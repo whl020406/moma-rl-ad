@@ -26,7 +26,7 @@ class CircleEnv(AbstractEnv):
         config["inner_lane_radius"] = 20
         config["num_lanes"] = 3
         config["vehicles_count"] = 3
-        config["controlled_vehicles"] = 2
+        config["controlled_vehicles"] = 1
         config["vehicles_density"] = 0.1
         config["max_speed"] = 5
         config["min_speed"] = 0

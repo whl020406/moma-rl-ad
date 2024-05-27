@@ -2,6 +2,7 @@ import gymnasium as gym
 import mo_gymnasium as mo_gym
 from matplotlib import pyplot as plt
 import numpy as np
+from src import MO_DQN
 
 env = mo_gym.make('circle-env-v0', render_mode='rgb_array')
 env.unwrapped.configure({
@@ -17,15 +18,8 @@ env.unwrapped.configure({
 env.unwrapped.configure({
     "manual_control": True
 })
-env.reset()
-done = False
-truncated = False
-while True:
-    #print(env.get_wrapper_attr('get_available_actions')())
-    obs, reward, done, truncated, info = env.step(env.action_space.sample())
-    print(reward)
-    env.render()
-    print(obs)
 
-plt.imshow(env.render())
-plt.show()
+obs, info = env.reset()
+
+agent = MO_DQN.MO_DQN(env, num_objectives=1, seed=11, observation_space_shape=obs[0].shape)
+agent.train()

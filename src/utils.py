@@ -6,7 +6,7 @@ class ReplayBuffer:
     def __init__(self, buffer_size, observation_space_shape, num_objectives, device, rng: np.random.Generator):
         self.size = buffer_size
         self.num_objectives = num_objectives
-        self.observation_space_size = np.cumsum(observation_space_shape)
+        self.observation_space_size = np.cumprod(observation_space_shape)[-1]
         self.device = device
         self.rng = rng
 
@@ -18,7 +18,8 @@ class ReplayBuffer:
         self.num_elements = 0 #keeps track of the current number of elements in the replay buffer
     
     def push(self, obs, action, next_obs, reward, terminated):
-        self.buffer[self.running_index] = torch.tensor([obs.flatten(), action, next_obs.flatten(), reward.flatten(), terminated], device=self.device)
+        elem = np.concatenate([obs.flatten(), [action], next_obs.flatten(), [reward], [terminated]])
+        self.buffer[self.running_index] = torch.tensor(elem)
         #update auxiliary variables
         self.running_index = (self.running_index + 1) % self.size
         if self.num_elements < self.size:
@@ -44,3 +45,9 @@ class ReplayBuffer:
     
     def get_termination_flag(self, samples):
         return samples[:,-1].flatten()
+    
+
+def random_objective_weights(num_objectives: int, rng: np.random.Generator):
+    random_weights = rng.random(num_objectives)
+    random_weights = random_weights / np.sum(random_weights) #normalise the random weights
+    return random_weights
