@@ -2,8 +2,24 @@ import gymnasium as gym
 import torch
 from torch import nn
 from torch import device
-from torch._C import device
 import numpy as np
+from ReplayBuffer import ReplayBuffer
+
+class DQN_Network(nn.Module):
+
+    def __init__(self, n_observations, n_actions):
+        super(DQN_Network, self).__init__()
+        self.layer1 = nn.Linear(n_observations, 128)
+        self.layer2 = nn.Linear(128, 128)
+        self.layer3 = nn.Linear(128, n_actions)
+
+    # Called with either one element to determine next action, or a batch
+    # during optimization. Returns tensor([[left0exp,right0exp]...]).
+    def forward(self, x):
+        x = torch.relu(self.layer1(x))
+        x = torch.relu(self.layer2(x))
+        return self.layer3(x)
+
 
 class MO_DQN:
     """ 
@@ -11,52 +27,42 @@ class MO_DQN:
     https://github.com/LucasAlegre/morl-baselines/blob/main/morl_baselines/single_policy/ser/mo_q_learning.py#L152
     """
 
-    def __init__(self, env: gym.Env | None, device: device | str = "auto", seed: int | None = None, observation_space_shape: int = 10,
-        num_objectives: int = 2, epsilon: float = 0.05, replay_enabled: bool = True, replay_buffer_size: int = 100, 
-        batch_ratio: float = 0.1) -> None:
+    def __init__(self, env: gym.Env | None, device: device | str = "auto", seed: int | None = None, 
+        observation_space_shape: int = 10, num_objectives: int = 2, num_actions: int = 5, epsilon: float = 0.05, 
+        replay_enabled: bool = True, replay_buffer_size: int = 100, batch_ratio: float = 0.1) -> None:
         
         self.env = env
         self.rng = np.random.default_rng(seed)
         self.device = device
         self.num_objectives = num_objectives
-        self.networks = self.__create_network(np.cumsum(observation_space_shape), self.num_objectives)
+        self.num_actions = num_actions
+        self.observation_space_shape = observation_space_shape
+
+        (self.policy_nets, self.target_nets) = \
+        self.__create_network(np.cumsum(observation_space_shape), self.num_objectives, self.num_actions)
+
         self.epsilon = epsilon
         self.replay_enabled = replay_enabled
         self.rb_size = replay_buffer_size
         self.batch_ratio = batch_ratio
 
         #initialise replay buffer
-        self.replay_buffer = torch.zeros(size=(self.rb_size, np.cumsum(observation_space_shape)+self.num_objectives+1),
-                                         device=self.device) # +1 for selected action
-        self.rb_running_index = 0 #keeps track of next index of the replay buffer to be filled
-        self.rb_num_elements = 0 #keeps track of the current number of elements in the replay buffer
+        self.replay_buffer = ReplayBuffer(self.rb_size, observation_space_shape, self.num_objectives, self.device)
+        
 
-    def __create_network(self, num_observations, num_objectives):
+    def __create_network(self, num_observations, num_objectives, num_actions):
         #create one network for each objective
-        models = []
+        policy_nets = []
+        target_nets = []
         for _ in range(num_objectives):
-            model = nn.Sequential(
-                nn.Linear(num_observations+1, 128), #+1 for the action taken
-                nn.ReLU(),
-                nn.Linear(128, 128), #feature extractor
-                nn.ReLU(),
-                nn.Linear(128, 64), #feature extractor
-                nn.ReLU(),
-                nn.Linear(64, 1), #function approximator --> output Q value
-            )
-            model = model.to(self.device) #move model to desired device
-            models.append(model)
-        return models
-    
+            p_net = DQN_Network(num_observations, num_actions).to(self.device)
+            t_net = DQN_Network(num_observations, num_actions).to(self.device)
+            t_net.load_state_dict(p_net.state_dict())
 
-    def __add_to_buffer(self, obs, action, reward):
-        self.replay_buffer[self.rb_running_index] = torch.tensor([obs.flatten(),action, reward.flatten()], device=self.device)
+            policy_nets.append(p_net)
+            target_nets.append(t_net)
 
-        #update auxiliary variables
-        self.rb_running_index = (self.rb_running_index + 1) % self.rb_size
-        if self.rb_num_elements < self.rb_size:
-            self.rb_num_elements += 1
-
+        return policy_nets, target_nets
 
     def train(self, num_iterations: int = 1000, target_update_frequency: int = 5):
         self.obs, _ = self.env.reset()
@@ -89,9 +95,12 @@ class MO_DQN:
         batch_indices = self.rng.choice(self.rb_num_elements, size=max(1,self.rb_num_elements*self.batch_ratio))
         batch_samples = self.replay_buffer[batch_indices]
 
-        #update each objective network
-        for obj_id in self.num_objectives:
-            action_values = self.networks[obj_id].
+        #go through each sample of the batch
+        for sample_id in range(batch_indices.shape[0]):
+            #fetch Q values of the current observation and action from all the objectives Q-networks
+            #compute loss between estimates and actual values
+            #backpropagate loss
+            pass
 
 
         #update the target networks
