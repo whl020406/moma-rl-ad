@@ -19,7 +19,7 @@ class CircleEnv(AbstractEnv):
             "screen_width": 600,
             "screen_height": 600,
             "centering_position": [0.5, 0.6],
-            "duration": 11,
+            "duration": 300,
             "normalize_reward": True,
             "fixed_centering_position":np.array([0,10])
             })
