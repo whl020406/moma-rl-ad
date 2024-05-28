@@ -21,5 +21,5 @@ env.unwrapped.configure({
 
 obs, info = env.reset()
 
-agent = MO_DQN.MO_DQN(env, num_objectives=1, seed=11, observation_space_shape=obs[0].shape)
+agent = MO_DQN.MO_DQN(env, num_objectives=1, seed=11, observation_space_shape=obs[0].shape, epsilon=0.1)
 agent.train()
