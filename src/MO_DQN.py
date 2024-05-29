@@ -4,8 +4,9 @@ from torch import nn
 from torch import device
 import numpy as np
 from typing import Tuple, Sequence
-from src.utils import ReplayBuffer, random_objective_weights
+from src.utils import ReplayBuffer, random_objective_weights, DataLogger
 from torch.nn.modules.loss import _Loss
+from tqdm import trange
 
 class DQN_Network(nn.Module):
 
@@ -37,10 +38,17 @@ class MO_DQN:
     def __init__(self, env: gym.Env | None, device: device = None, seed: int | None = None, 
         observation_space_shape: Sequence[int] = [1,1], num_objectives: int = 2, num_actions: int = 5, epsilon: float = 0.05, 
         replay_enabled: bool = True, replay_buffer_size: int = 100, batch_ratio: float = 0.1, objective_weights: Sequence[float] = None,
-        optimiser: torch.optim.Optimizer = torch.optim.SGD, loss_criterion: _Loss = nn.SmoothL1Loss) -> None:
+        optimiser: torch.optim.Optimizer = torch.optim.SGD, loss_criterion: _Loss = nn.SmoothL1Loss, episode_recording_interval: int = None) -> None:
         
         self.env = env
+        self.recording_interval = episode_recording_interval
+        if episode_recording_interval is not None:
+            self.env = gym.wrappers.RecordVideo(self.env, video_folder="videos", name_prefix="training_MODQN", 
+                                                episode_trigger=lambda x: x % self.recording_interval == 0)
+            self.env.metadata["render_fps"] = 30
+            
         self.rng = np.random.default_rng(seed)
+        torch.manual_seed(seed)
 
         self.device = device
         if self.device is None:
@@ -68,6 +76,10 @@ class MO_DQN:
         #initialise replay buffer
         self.buffer = ReplayBuffer(self.rb_size, observation_space_shape, self.num_objectives, self.device, self.rng)
 
+        #initialise reward logger
+        self.reward_logger = DataLogger("reward_logger",["episode","accumulated_reward"])
+
+
     def __create_network(self, num_observations, num_actions, num_objectives) -> Tuple[nn.Module, nn.Module]:
         #create one network for each objective
         policy_net = DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
@@ -83,9 +95,10 @@ class MO_DQN:
         self.optimiser = self.optimiser_class(self.policy_net.parameters())
         self.loss_func = self.loss_criterion()
 
+        accumulated_rewards = 0
+        episode_nr = 0
         #take step in environment
-        for i in range(num_iterations):
-            print("Iteration: ",i)
+        for i in trange(num_iterations, desc="Iterations", mininterval=2):
             self.action = self.act(self.obs, eps_greedy=True)
             (
                 self.next_obs,
@@ -95,6 +108,8 @@ class MO_DQN:
                 info,
             ) = self.env.step(self.action)
             self.next_obs = self.next_obs[0] #TODO: remove when going to multi-agent
+            #accumulate reward
+            accumulated_rewards += self.reward
             #push to replay buffer
             self.buffer.push(self.obs, self.action, self.next_obs, self.reward, self.terminated)
 
@@ -104,10 +119,16 @@ class MO_DQN:
             #TODO: maybe use separate environment for policy evaluation
 
             if self.terminated or self.truncated:
+                self.reward_logger.add(episode_nr, accumulated_rewards)
+
+                accumulated_rewards = 0
+                episode_nr += 1
                 self.obs, _ = self.env.reset()
                 self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
 
                 #TODO: maybe keep track of the current number of episodes that were run
+
+        return self.reward_logger.to_dataframe()
 
     def __update_weights(self, current_iteration, target_update_frequency):
         #update normal network each time the function is called
@@ -123,8 +144,8 @@ class MO_DQN:
         rewards  = self.buffer.get_rewards(batch_samples)
         #go through each sample of the batch
         #fetch Q values of the current observation and action from all the objectives Q-networks
-        if (observations.shape[0] > 1):
-            print(observations.shape)
+        #if (observations.shape[0] > 1):
+        #    print(observations.shape)
         state_action_values = self.policy_net(observations)
         state_action_values = state_action_values.gather(2, actions).reshape(observations.shape[0],self.num_objectives)
         next_state_values = self.target_net(next_obs).max(2).values

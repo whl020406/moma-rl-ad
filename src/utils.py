@@ -55,21 +55,21 @@ class DataLogger:
         self.tupleType = namedtuple(loggerName, fieldNames)
         self.tuple_list = []
 
-    def add_by_list(self, entry_list: List):
+    def _add_by_list(self, entry_list: List):
         self.tuple_list.append(self.tupleType(*entry_list))
+        
+    def _add_by_params(self, *args, **kwargs):
+        self.tuple_list.append(self.tupleType(*args, **kwargs))
 
     def add(self, *args, **kwargs):
         if isinstance(args, tuple) and len(args) == 1 and len(kwargs.values()) == 0:
-            self.add_by_list(args[0])
+            self._add_by_list(args[0])
 
         elif isinstance(args, tuple) and len(args) == 0 and len(kwargs.values()) == 1:
-            self.add_by_list(list(kwargs.values())[0])
+            self._add_by_list(list(kwargs.values())[0])
 
         else:
-            self.add_by_params(*args, **kwargs)
-        
-    def add_by_params(self, *args, **kwargs):
-        self.tuple_list.append(self.tupleType(*args, **kwargs))
+            self._add_by_params(*args, **kwargs)
 
     def to_dataframe(self):
         return pd.DataFrame(self.tuple_list)
