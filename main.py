@@ -2,6 +2,7 @@ import gymnasium as gym
 import mo_gymnasium as mo_gym
 from matplotlib import pyplot as plt
 import numpy as np
+from src import __init__ #initialises important packages / environments
 
 env = mo_gym.make('circle-env-v0', render_mode='rgb_array')
 env.unwrapped.configure({
