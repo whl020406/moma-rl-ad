@@ -54,7 +54,7 @@ class CircleEnv(AbstractEnv):
         return {
             "collision_reward": self.vehicle.crashed,
             "high_speed_reward": MDPVehicle.get_speed_index(self.vehicle)
-            / (MDPVehicle.DEFAULT_TARGET_SPEEDS.size - 1),
+            / (self.vehicle.target_speeds.size - 1),
             "lane_change_reward": action in [0, 2],
             "on_road_reward": self.vehicle.on_road,
         }
