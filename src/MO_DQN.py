@@ -95,7 +95,7 @@ class MO_DQN:
         self.optimiser = self.optimiser_class(self.policy_net.parameters())
         self.loss_func = self.loss_criterion()
 
-        accumulated_rewards = 0
+        accumulated_rewards = np.zeros(self.num_objectives)
         episode_nr = 0
         #take step in environment
         for i in trange(num_iterations, desc="Iterations", mininterval=2):
@@ -115,8 +115,6 @@ class MO_DQN:
 
             #update the weights
             self.__update_weights(i, target_update_frequency)
-
-            #TODO: maybe use separate environment for policy evaluation
 
             if self.terminated or self.truncated:
                 self.reward_logger.add(episode_nr, accumulated_rewards)

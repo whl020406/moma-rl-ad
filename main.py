@@ -26,7 +26,6 @@ while True:
     obs, reward, done, truncated, info = env.step(env.action_space.sample())
     print(reward)
     env.render()
-    print(reward)
 
 plt.imshow(env.render())
 plt.show()
