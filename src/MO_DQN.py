@@ -94,7 +94,6 @@ class MO_DQN:
         self.gamma = gamma
         self.optimiser = self.optimiser_class(self.policy_net.parameters())
         self.loss_func = self.loss_criterion()
-
         accumulated_rewards = np.zeros(self.num_objectives)
         episode_nr = 0
         #take step in environment
@@ -123,8 +122,7 @@ class MO_DQN:
                 episode_nr += 1
                 self.obs, _ = self.env.reset()
                 self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
-
-                #TODO: maybe keep track of the current number of episodes that were run
+                self.objective_weights = random_objective_weights(self.num_objectives, self.rng)
 
         return self.reward_logger.to_dataframe()
 
@@ -145,7 +143,8 @@ class MO_DQN:
         #if (observations.shape[0] > 1):
         #    print(observations.shape)
         state_action_values = self.policy_net(observations)
-        state_action_values = state_action_values.gather(2, actions).reshape(observations.shape[0],self.num_objectives)
+        state_action_values = state_action_values.gather(2, actions)
+        state_action_values = state_action_values.reshape(observations.shape[0],self.num_objectives)
         next_state_values = self.target_net(next_obs).max(2).values
         next_state_values[term_flags] = 0
             
@@ -162,7 +161,7 @@ class MO_DQN:
         if (current_iteration % target_update_frequency) == 0:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
     def act(self, obs, eps_greedy: bool = False):
-        #TODO: only select based on available actions instead of all actions
+        #TODO: during execution: only select based on available actions instead of all actions when eps_greedy is false
         #choose action based on epsilon greedy policy and policy network
         #assumption: actions are discrete and labelled from 0 to n-1
         r = self.rng.random()

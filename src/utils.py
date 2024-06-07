@@ -21,7 +21,9 @@ class ReplayBuffer:
         self.num_elements = 0 #keeps track of the current number of elements in the replay buffer
     
     def push(self, obs, action, next_obs, reward, terminated):
-        elem = np.concatenate([obs.flatten(), [action], next_obs.flatten(), [reward], [terminated]])
+        if self.num_objectives == 1:
+            reward = [reward]
+        elem = np.concatenate([obs.flatten(), [action], next_obs.flatten(), reward, [terminated]])
         self.buffer[self.running_index] = torch.tensor(elem)
         #update auxiliary variables
         self.running_index = (self.running_index + 1) % self.size
@@ -38,8 +40,10 @@ class ReplayBuffer:
         return samples[:,:self.observation_space_size]
 
     def get_actions(self, samples):
-        return samples[:,self.observation_space_size].to(torch.int64).reshape(-1,self.num_objectives,1)
-    
+        elem = samples[:,self.observation_space_size].to(torch.int64)#.reshape(-1,1,1) #second element was self.num_objectives
+        arr = np.repeat(elem, repeats=self.num_objectives)
+        arr = arr.reshape(-1,self.num_objectives,1)
+        return arr
     def get_next_obs(self, samples):
         return samples[:,self.observation_space_size+1:self.observation_space_size*2+1]
 
