@@ -82,3 +82,44 @@ def random_objective_weights(num_objectives: int, rng: np.random.Generator):
     random_weights = rng.random(num_objectives)
     random_weights = random_weights / np.sum(random_weights) #normalise the random weights
     return random_weights
+
+
+def calc_energy_consumption(vehicle,type='light_passenger',fuel='gasoline'):
+    ''' Calculates the amount of CO2 emmissions which is taken as a means of measuring the energy consumption.
+        Code taken from: https://github.com/amrzr/SA-MOEAMOPG/blob/55ceddc58062f2d7d26107d7813d2dd7328f2203/SAMOEA_PGMORL/highway_env/envs/two_way_env.py#L139C1-L209C22.
+        Equation is described in: https://journals.sagepub.com/doi/full/10.1177/0361198119839970'''
+    acceleration = vehicle.action['acceleration'] 
+    velocity = vehicle.speed
+
+    if fuel == 'gasoline':
+        T_idle = 2392    # CO2 emission from gasoline [gCO2/L]
+        E_gas =  31.5e6  # Energy in gasoline [J\L]
+    elif fuel == 'diesel':
+        T_idle = 2660   # CO2 emission from diesel [gCO2/L]
+        E_gas =  38e6   # Energy in diesel [J\L]
+
+    if type == 'light_passenger':
+        M = 1334    # light-duty passenger vehicle mass [kg]
+    elif type == 'light_van':
+        M = 1752    # light-duty van vehicle mass [kg]
+    
+    Crr = 0.015     # Rolling resistance
+    Cd  = 0.3       # Aerodynamic drag coefficient
+    A = 2.5         # Frontal area [m2]
+    g = 9.81        # Gravitational acceleration
+    r = 0           # Regeneration efficiency ratio
+    pho = 1.225     # Air density
+    fuel_eff = 0.7  # fuel efficiency [70%]
+
+    
+    condition = M  * acceleration * velocity + M  * g * Crr * velocity +0.5 * Cd * A  * pho * velocity **3
+    
+    Ei = T_idle  / E_gas  * condition
+
+    if Ei <= 0:
+        E = r
+    else:
+        Ei = Ei * (velocity + 0.5 * acceleration)
+        E = Ei/fuel_eff
+
+    return np.abs(E)

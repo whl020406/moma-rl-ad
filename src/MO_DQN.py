@@ -7,7 +7,7 @@ from typing import Tuple, Sequence
 from src.utils import ReplayBuffer, random_objective_weights, DataLogger
 from torch.nn.modules.loss import _Loss
 from tqdm import trange
-
+from typing import List
 class DQN_Network(nn.Module):
 
     def __init__(self, n_observations, n_actions, n_objectives):
@@ -38,8 +38,14 @@ class MO_DQN:
     def __init__(self, env: gym.Env | None, device: device = None, seed: int | None = None, 
         observation_space_shape: Sequence[int] = [1,1], num_objectives: int = 2, num_actions: int = 5, epsilon: float = 0.05, 
         replay_enabled: bool = True, replay_buffer_size: int = 100, batch_ratio: float = 0.1, objective_weights: Sequence[float] = None,
-        optimiser: torch.optim.Optimizer = torch.optim.SGD, loss_criterion: _Loss = nn.SmoothL1Loss, episode_recording_interval: int = None) -> None:
+        optimiser: torch.optim.Optimizer = torch.optim.SGD, loss_criterion: _Loss = nn.SmoothL1Loss, episode_recording_interval: int = None,
+        objective_names: List[str] = None) -> None:
         
+        if objective_names is None:
+            objective_names = [f"reward_{x}" for x in range(num_objectives)]
+        
+        assert len(objective_names) == num_objectives, "The number of elements in the objective_names list must be equal to the number of objectives!"
+
         self.env = env
         self.recording_interval = episode_recording_interval
         if episode_recording_interval is not None:
@@ -77,7 +83,9 @@ class MO_DQN:
         self.buffer = ReplayBuffer(self.rb_size, observation_space_shape, self.num_objectives, self.device, self.rng)
 
         #initialise reward logger
-        self.reward_logger = DataLogger("reward_logger",["episode","accumulated_reward"])
+        feature_names = ["episode"]
+        feature_names.extend(objective_names)
+        self.reward_logger = DataLogger("reward_logger",feature_names)
 
 
     def __create_network(self, num_observations, num_actions, num_objectives) -> Tuple[nn.Module, nn.Module]:
@@ -116,7 +124,7 @@ class MO_DQN:
             self.__update_weights(i, target_update_frequency)
 
             if self.terminated or self.truncated:
-                self.reward_logger.add(episode_nr, accumulated_rewards)
+                self.reward_logger.add(episode_nr, *list(accumulated_rewards))
 
                 accumulated_rewards = 0
                 episode_nr += 1
