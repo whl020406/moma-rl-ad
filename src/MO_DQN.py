@@ -199,3 +199,10 @@ class MO_DQN:
     
     def set_objective_weights(self, weights: np.ndarray):
         self.objective_weights = weights
+
+    def store_network_weights(self, model_path: str, model_name: str):
+        torch.save(self.policy_net.state_dict(), f"{model_path}_{model_name}")
+
+    def load_network_weights(self, model_path: str):
+        self.policy_net.load_state_dict(torch.load(model_path))
+        self.target_net.load_state_dict(torch.load(model_path))
