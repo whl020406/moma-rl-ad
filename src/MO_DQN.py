@@ -63,7 +63,7 @@ class MO_DQN:
         self.num_objectives = num_objectives
         self.objective_weights = objective_weights
         if self.objective_weights is None:
-            self.objective_weights = random_objective_weights(self.num_objectives, self.rng)
+            self.objective_weights = random_objective_weights(self.num_objectives, self.rng, self.device)
 
         self.num_actions = num_actions
         self.observation_space_shape = observation_space_shape
@@ -130,7 +130,7 @@ class MO_DQN:
                 episode_nr += 1
                 self.obs, _ = self.env.reset()
                 self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
-                self.objective_weights = random_objective_weights(self.num_objectives, self.rng)
+                self.objective_weights = random_objective_weights(self.num_objectives, self.rng, self.device)
 
         return self.reward_logger.to_dataframe()
 

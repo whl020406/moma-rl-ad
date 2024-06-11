@@ -78,9 +78,9 @@ class DataLogger:
     def to_dataframe(self):
         return pd.DataFrame(self.tuple_list)
 
-def random_objective_weights(num_objectives: int, rng: np.random.Generator):
+def random_objective_weights(num_objectives: int, rng: np.random.Generator, device):
     random_weights = rng.random(num_objectives)
-    random_weights = random_weights / np.sum(random_weights) #normalise the random weights
+    random_weights = torch.tensor(random_weights / np.sum(random_weights), device=device) #normalise the random weights
     return random_weights
 
 
