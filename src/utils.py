@@ -1,7 +1,8 @@
 import torch
 import numpy as np
 from collections import namedtuple
-from typing import Tuple, List, NamedTuple
+from typing import List
+from highway_env.vehicle.kinematics import Vehicle
 import pandas as pd
 
 class ReplayBuffer:
@@ -21,10 +22,8 @@ class ReplayBuffer:
         self.num_elements = 0 #keeps track of the current number of elements in the replay buffer
     
     def push(self, obs, action, next_obs, reward, terminated):
-        if self.num_objectives == 1:
-            reward = [reward]
-        elem = np.concatenate([obs.flatten(), [action], next_obs.flatten(), reward, [terminated]])
-        self.buffer[self.running_index] = torch.tensor(elem)
+        elem = torch.concatenate([obs.flatten(), action, next_obs.flatten(), reward, terminated])
+        self.buffer[self.running_index] = elem
         #update auxiliary variables
         self.running_index = (self.running_index + 1) % self.size
         if self.num_elements < self.size:
@@ -39,9 +38,9 @@ class ReplayBuffer:
     def get_observations(self, samples):
         return samples[:,:self.observation_space_size]
 
-    def get_actions(self, samples):
+    def get_actions(self, samples: torch.Tensor):
         elem = samples[:,self.observation_space_size].to(torch.int64)#.reshape(-1,1,1) #second element was self.num_objectives
-        arr = np.repeat(elem, repeats=self.num_objectives)
+        arr = elem.repeat_interleave(repeats=self.num_objectives)
         arr = arr.reshape(-1,self.num_objectives,1)
         return arr
     def get_next_obs(self, samples):
@@ -84,13 +83,30 @@ def random_objective_weights(num_objectives: int, rng: np.random.Generator, devi
     return random_weights
 
 
-def calc_energy_consumption(vehicle,type='light_passenger',fuel='gasoline'):
-    ''' Calculates the amount of CO2 emmissions which is taken as a means of measuring the energy consumption.
-        Code taken from: https://github.com/amrzr/SA-MOEAMOPG/blob/55ceddc58062f2d7d26107d7813d2dd7328f2203/SAMOEA_PGMORL/highway_env/envs/two_way_env.py#L139C1-L209C22.
-        Equation is described in: https://journals.sagepub.com/doi/full/10.1177/0361198119839970'''
+def calc_energy_consumption(vehicle: Vehicle, type='light_passenger',fuel='gasoline', normalise: bool = False):
+    ''' Calculates the amount of CO2 emmissions which is taken as a means of measuring the energy consumption.'''
+
     acceleration = vehicle.action['acceleration'] 
     velocity = vehicle.speed
+    max_energy_consumption = 1 #if normalise parameter is false
 
+
+    current_energy_consumption = compute_co2_emission(acceleration, velocity)
+    
+    # compute maximum possible energy consumption based on maximum velocity and acceleration 
+    # and use this value for normalisation
+    if normalise:
+        max_acc = vehicle.KP_A * (vehicle.MAX_SPEED - vehicle.MIN_SPEED)
+        max_speed = vehicle.MAX_SPEED
+
+        max_energy_consumption = compute_co2_emission(max_acc, max_speed)
+
+    return current_energy_consumption / max_energy_consumption
+
+def compute_co2_emission(acceleration, velocity, type='light_passenger',fuel='gasoline'):
+    '''Code taken from: https://github.com/amrzr/SA-MOEAMOPG/blob/55ceddc58062f2d7d26107d7813d2dd7328f2203/SAMOEA_PGMORL/highway_env/envs/two_way_env.py#L139C1-L209C22.
+        Equation is described in: https://journals.sagepub.com/doi/full/10.1177/0361198119839970'''
+     
     if fuel == 'gasoline':
         T_idle = 2392    # CO2 emission from gasoline [gCO2/L]
         E_gas =  31.5e6  # Energy in gasoline [J\L]

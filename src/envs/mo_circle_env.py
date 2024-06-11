@@ -5,7 +5,6 @@ from highway_env.envs import AbstractEnv, RoadNetwork, Road, LineType, CircularL
 from utils import calc_energy_consumption
 from circle_env import CircleEnv
 from highway_env.vehicle.controller import MDPVehicle
-from highway_env.vehicle.kinematics import Vehicle
 
 class MOCircleEnv(CircleEnv):
     @classmethod
@@ -40,8 +39,8 @@ class MOCircleEnv(CircleEnv):
         return {
             "collision_reward": self.vehicle.crashed,
             "high_speed_reward": MDPVehicle.get_speed_index(self.vehicle)
-            / (self.vehicle.target_speeds.size - 1),
-            "energy_consumption_reward": calc_energy_consumption(self.vehicle),
+            / (self.vehicle.target_speeds.size - 1), #this reward is always normalised
+            "energy_consumption_reward": calc_energy_consumption(self.vehicle, normalise=self.config["normalize_reward"]),
             "lane_change_reward": action in [0, 2],
         }
         

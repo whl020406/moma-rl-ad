@@ -114,9 +114,16 @@ class MO_DQN:
                 self.truncated,
                 info,
             ) = self.env.step(self.action)
-            self.next_obs = self.next_obs[0] #TODO: remove when going to multi-agent
-            #accumulate reward
-            accumulated_rewards += self.reward
+            #accumulate episode reward
+            accumulated_rewards = accumulated_rewards + self.reward
+
+            #cast return values to gpu tensor before storing them in replay buffer
+            self.next_obs = torch.tensor(self.next_obs[0], device=self.device) #TODO: remove when going to multi-agent
+            if self.num_objectives == 1:
+                self.reward = [self.reward]
+            self.reward = torch.tensor(self.reward, device=self.device)
+            self.action = torch.tensor([self.action], device=self.device)
+            self.terminated = torch.tensor([self.terminated], device=self.device)
             #push to replay buffer
             self.buffer.push(self.obs, self.action, self.next_obs, self.reward, self.terminated)
 
@@ -168,6 +175,7 @@ class MO_DQN:
         #update the target networks
         if (current_iteration % target_update_frequency) == 0:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
+
     def act(self, obs, eps_greedy: bool = False):
         #TODO: during execution: only select based on available actions instead of all actions when eps_greedy is false
         #choose action based on epsilon greedy policy and policy network

@@ -121,6 +121,8 @@ class CircleEnv(AbstractEnv):
             vehicle = self.action_type.vehicle_class(
                 self.road, vehicle.position, vehicle.heading, vehicle.speed
             )
+            vehicle.MAX_SPEED = self.config["max_speed"]
+            vehicle.MIN_SPEED = self.config["min_speed"]
             self.controlled_vehicles.append(vehicle)
             self.road.vehicles.append(vehicle)
 
