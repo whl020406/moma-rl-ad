@@ -36,8 +36,8 @@ class MO_DQN:
     """
 
     def __init__(self, env: gym.Env | None, device: device = None, seed: int | None = None, 
-        observation_space_shape: Sequence[int] = [1,1], num_objectives: int = 2, num_actions: int = 5, epsilon: float = 0.05, 
-        replay_enabled: bool = True, replay_buffer_size: int = 100, batch_ratio: float = 0.1, objective_weights: Sequence[float] = None,
+        observation_space_shape: Sequence[int] = [1,1], num_objectives: int = 2, num_actions: int = 5, 
+        replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, objective_weights: Sequence[float] = None,
         optimiser: torch.optim.Optimizer = torch.optim.SGD, loss_criterion: _Loss = nn.SmoothL1Loss, episode_recording_interval: int = None,
         objective_names: List[str] = None) -> None:
         
@@ -96,17 +96,28 @@ class MO_DQN:
 
         return policy_net, target_net
 
-    def train(self, num_iterations: int = 1000, target_update_frequency: int = 5, gamma: float = 1):
+    def train(self, num_iterations: int = 1000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 5, 
+              gamma: float = 1, epsilon_start: float = 0.05, epsilon_end: float = 0) :
+        '''
+        Runs the training procedure for num_iterations iterations. The inv_optimisation_frequency specifies 
+        the number of iterations after which a weight update occurs.The inv_target_update_frequency specifies 
+        the number of weight updates of the policy net, after which the target net weights are adjusted.
+        Gamma is the discount factor for the rewards. Epsilon is the probability of a random action being selected during training.
+        Its value is linearly reduced during the training procedure from epsilon_start to epsilon_end.
+        '''
         self.obs, _ = self.env.reset()
         self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
         self.gamma = gamma
+        self.epsilon = epsilon_start
         self.optimiser = self.optimiser_class(self.policy_net.parameters())
         self.loss_func = self.loss_criterion()
         accumulated_rewards = np.zeros(self.num_objectives)
         episode_nr = 0
+        num_of_conducted_optimisation_steps = 0
         #take step in environment
         for i in trange(num_iterations, desc="Iterations", mininterval=2):
             self.action = self.act(self.obs, eps_greedy=True)
+            self.reduce_epsilon(num_iterations, epsilon_start, epsilon_end) #linearly reduce the value of epsilon
             (
                 self.next_obs,
                 self.reward,
@@ -127,8 +138,10 @@ class MO_DQN:
             #push to replay buffer
             self.buffer.push(self.obs, self.action, self.next_obs, self.reward, self.terminated)
 
-            #update the weights
-            self.__update_weights(i, target_update_frequency)
+            #update the weights every optimisation_frequency steps
+            if (i % inv_optimisation_frequency) == 0:
+                self.__update_weights(num_of_conducted_optimisation_steps, inv_target_update_frequency)
+                num_of_conducted_optimisation_steps += 1
 
             if self.terminated or self.truncated:
                 self.reward_logger.add(episode_nr, *list(accumulated_rewards))
@@ -141,7 +154,7 @@ class MO_DQN:
 
         return self.reward_logger.to_dataframe()
 
-    def __update_weights(self, current_iteration, target_update_frequency):
+    def __update_weights(self, current_optimisation_iteration, inv_target_update_frequency):
         #update normal network each time the function is called
         #update target network every k steps
         self.policy_net.train()
@@ -173,7 +186,7 @@ class MO_DQN:
         self.optimiser.step()
 
         #update the target networks
-        if (current_iteration % target_update_frequency) == 0:
+        if (current_optimisation_iteration % inv_target_update_frequency) == 0:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
 
     def act(self, obs, eps_greedy: bool = False):
@@ -197,6 +210,9 @@ class MO_DQN:
 
         return action
     
+    def reduce_epsilon(self, max_iteration, eps_start, eps_end):
+        self.epsilon = self.epsilon - (eps_start-eps_end)/max_iteration
+
     def set_objective_weights(self, weights: np.ndarray):
         self.objective_weights = weights
 

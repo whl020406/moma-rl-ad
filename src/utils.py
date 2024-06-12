@@ -83,25 +83,30 @@ def random_objective_weights(num_objectives: int, rng: np.random.Generator, devi
     return random_weights
 
 
-def calc_energy_consumption(vehicle: Vehicle, type='light_passenger',fuel='gasoline', normalise: bool = False):
-    ''' Calculates the amount of CO2 emmissions which is taken as a means of measuring the energy consumption.'''
+def calc_energy_efficiency(vehicle: Vehicle, type='light_passenger',fuel='gasoline', normalise: bool = False):
+    ''' Calculates the difference between maximum and current CO2 emmissions, 
+        which is taken as a means of measuring the energy efficiency.
+        Meaning: poor energy efficiency --> close to 0, great efficiency --> close to value 1 (for normalise = True)
+    '''
 
-    acceleration = vehicle.action['acceleration'] 
-    velocity = vehicle.speed
-    max_energy_consumption = 1 #if normalise parameter is false
+    curr_ac = vehicle.action['acceleration'] 
+    curr_speed = vehicle.speed
 
+    # maximum possible acceleration computed using the formula found in ControlledVehicle class of highway-env
+    max_acc = vehicle.KP_A * (vehicle.MAX_SPEED - vehicle.MIN_SPEED)
+    max_speed = vehicle.MAX_SPEED
 
-    current_energy_consumption = compute_co2_emission(acceleration, velocity)
+    max_energy_consumption = compute_co2_emission(max_acc, max_speed)
+    current_energy_consumption = compute_co2_emission(curr_ac, curr_speed)
+
+    efficiency = max_energy_consumption - current_energy_consumption
     
     # compute maximum possible energy consumption based on maximum velocity and acceleration 
     # and use this value for normalisation
     if normalise:
-        max_acc = vehicle.KP_A * (vehicle.MAX_SPEED - vehicle.MIN_SPEED)
-        max_speed = vehicle.MAX_SPEED
+        efficiency /= max_energy_consumption
 
-        max_energy_consumption = compute_co2_emission(max_acc, max_speed)
-
-    return current_energy_consumption / max_energy_consumption
+    return efficiency
 
 def compute_co2_emission(acceleration, velocity, type='light_passenger',fuel='gasoline'):
     '''Code taken from: https://github.com/amrzr/SA-MOEAMOPG/blob/55ceddc58062f2d7d26107d7813d2dd7328f2203/SAMOEA_PGMORL/highway_env/envs/two_way_env.py#L139C1-L209C22.
