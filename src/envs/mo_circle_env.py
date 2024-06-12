@@ -2,7 +2,7 @@ from typing import Dict, Text
 import numpy as np
 from highway_env import utils
 from highway_env.envs import AbstractEnv, RoadNetwork, Road, LineType, CircularLane
-from utils import calc_energy_consumption
+from utils import calc_energy_efficiency
 from circle_env import CircleEnv
 from highway_env.vehicle.controller import MDPVehicle
 
@@ -15,7 +15,7 @@ class MOCircleEnv(CircleEnv):
             "collision_reward": -1,
             "high_speed_reward": 0.2,
             "lane_change_reward": -0.05,
-            "energy_consumption_reward": -0.2,
+            "energy_consumption_reward": 0.2,
             "normalize_reward": True,
             #add energy reward
             #add lane reward
@@ -40,7 +40,7 @@ class MOCircleEnv(CircleEnv):
             "collision_reward": self.vehicle.crashed,
             "high_speed_reward": MDPVehicle.get_speed_index(self.vehicle)
             / (self.vehicle.target_speeds.size - 1), #this reward is always normalised
-            "energy_consumption_reward": calc_energy_consumption(self.vehicle, normalise=self.config["normalize_reward"]),
+            "energy_consumption_reward": calc_energy_efficiency(self.vehicle, normalise=self.config["normalize_reward"]),
             "lane_change_reward": action in [0, 2],
         }
         

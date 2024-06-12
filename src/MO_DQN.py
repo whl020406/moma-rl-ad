@@ -71,7 +71,6 @@ class MO_DQN:
         (self.policy_net, self.target_net) = \
         self.__create_network(np.cumprod(observation_space_shape)[-1], self.num_actions, self.num_objectives)
 
-        self.epsilon = epsilon
         self.replay_enabled = replay_enabled
         self.rb_size = replay_buffer_size
         self.batch_ratio = batch_ratio
