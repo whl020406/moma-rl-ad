@@ -100,8 +100,6 @@ class CircleEnv(AbstractEnv):
         """
         Populate a road with several vehicles on the highway and on the merging lane, as well as an ego-vehicle.
         """
-        position_deviation = 2
-        speed_deviation = 2
 
         # Other vehicles
         other_vehicles_type = utils.class_from_path(self.config["other_vehicles_type"])
@@ -114,7 +112,7 @@ class CircleEnv(AbstractEnv):
             #ego vehicle
             vehicle = Vehicle.create_random(
                 self.road,
-                speed=self.np_random.random()*(self.config["max_speed"]-self.config["min_speed"])+self.config["min_speed"],
+                speed=0.5*(self.config["max_speed"]-self.config["min_speed"])+self.config["min_speed"],
                 lane_id=self.np_random.integers(0, self.num_lanes),
                 spacing=1,
             )
@@ -129,7 +127,8 @@ class CircleEnv(AbstractEnv):
             #other vehicles
             for _ in range(others):
                 vehicle = other_vehicles_type.create_random(
-                    self.road, spacing=1 / self.config["vehicles_density"]
+                    self.road, spacing=1 / self.config["vehicles_density"], lane_id=self.np_random.integers(0, self.num_lanes),
+                    speed=0.5*(self.config["max_speed"]-self.config["min_speed"])+self.config["min_speed"]
                 )
                 vehicle.randomize_behavior()
                 self.road.vehicles.append(vehicle)
