@@ -14,17 +14,34 @@ class ChebyshevScalarisation:
         It acts as a non-linear alternative to linear scaling to choose actions based on vectorial Q-value estimates.
         It is implemented as a class due to the dynamic nature of the utopian point."""
     
-    def __init__(self, initial_utopian: np.ndarray, threshold_value: float) -> None:
+    def __init__(self, initial_utopian: torch.Tensor, threshold_value: float) -> None:
         self.z_star = initial_utopian #initialise utopian point z*. It is a vector with the same dimensions as the vectorial Q-values
         self.threshold = threshold_value
 
-    def scalarise_actions(self, action_q_estimates, objective_weights) -> np.ndarray:
-        abs_diffs = np.abs(action_q_estimates - (self.z_star + self.threshold))
-        sq_values = np.max(objective_weights * abs_diffs, axis=1)
+    def scalarise_actions(self, action_q_estimates: torch.Tensor, objective_weights: torch.Tensor) -> torch.Tensor:
+        z_final = (self.z_star + self.threshold).reshape(-1,1)
+        diffs = action_q_estimates - z_final
+        abs_diffs = torch.abs(diffs)
+        weighted_diffs = objective_weights.reshape(-1,1) * abs_diffs
+        sq_values = torch.max(weighted_diffs, dim=1)[0]
         return sq_values
 
     def update_utopian(self, update_vector: np.ndarray) -> None:
         self.z_star = np.max([self.z_star, update_vector], axis=0)
+
+#TEST Chebyshev Scalarisation
+scal = ChebyshevScalarisation(torch.tensor([0,0.01]), 0.01)
+#shape: (num_obs, num_obj, num_actions)
+q_estimates = torch.tensor([[[0.5,0.2,0.3],
+                             [0.1,0.02,0.5]],
+
+                            [[0.1,0.1,0.1],
+                             [0.1,0.1,0.1]]])
+obj_weights = torch.tensor([0.2,0.8])
+
+out = scal.scalarise_actions(q_estimates, obj_weights)
+print(out)
+
 
 class ReplayBuffer:
         
