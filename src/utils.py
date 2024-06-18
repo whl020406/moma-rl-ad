@@ -18,10 +18,10 @@ class ChebyshevScalarisation:
         self.z_star = initial_utopian #initialise utopian point z*. It is a vector with the same dimensions as the vectorial Q-values
         self.threshold = threshold_value
 
-    def scalarise_actions(self, action_q_estimates) -> np.ndarray:
-        scalarised_action_values  = self.z_star * action_q_estimates
-        scalarised_action_values += self.threshold
-        return scalarised_action_values
+    def scalarise_actions(self, action_q_estimates, objective_weights) -> np.ndarray:
+        abs_diffs = np.abs(action_q_estimates - (self.z_star + self.threshold))
+        sq_values = np.max(objective_weights * abs_diffs, axis=1)
+        return sq_values
 
     def update_utopian(self, update_vector: np.ndarray) -> None:
         self.z_star = np.max([self.z_star, update_vector], axis=0)
