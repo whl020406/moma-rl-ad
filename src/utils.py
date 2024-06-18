@@ -5,6 +5,27 @@ from typing import List
 from highway_env.vehicle.kinematics import Vehicle
 import pandas as pd
 
+
+class ChebyshevScalarisation:
+    """ This class computes the chebyshev scalarisation for a vectorial Q-value and corresponding utopian point z*
+        as described in Scalarized Multi-Objective Reinforcement Learning: Novel Design Techniques
+        https://www.researchgate.net/publication/235698665_Scalarized_Multi-Objective_Reinforcement_Learning_Novel_Design_Techniques
+        
+        It acts as a non-linear alternative to linear scaling to choose actions based on vectorial Q-value estimates.
+        It is implemented as a class due to the dynamic nature of the utopian point."""
+    
+    def __init__(self, initial_utopian: np.ndarray, threshold_value: float) -> None:
+        self.z_star = initial_utopian #initialise utopian point z*. It is a vector with the same dimensions as the vectorial Q-values
+        self.threshold = threshold_value
+
+    def scalarise_actions(self, action_q_estimates) -> np.ndarray:
+        scalarised_action_values  = self.z_star * action_q_estimates
+        scalarised_action_values += self.threshold
+        return scalarised_action_values
+
+    def update_utopian(self, update_vector: np.ndarray) -> None:
+        self.z_star = np.max([self.z_star, update_vector], axis=0)
+
 class ReplayBuffer:
         
     def __init__(self, buffer_size, observation_space_shape, num_objectives, device, rng: np.random.Generator):
