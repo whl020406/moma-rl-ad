@@ -121,6 +121,7 @@ def random_objective_weights(num_objectives: int, rng: np.random.Generator, devi
 
 
 def calc_hypervolume(reference_point, reward_vector):
+    reward_vector = reward_vector * (-1) # convert to minimisation problem
     ind = HV(ref_point=reference_point)
     return ind(reward_vector)
 
