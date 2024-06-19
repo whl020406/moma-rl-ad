@@ -14,11 +14,13 @@ class ChebyshevScalarisation:
         It acts as a non-linear alternative to linear scaling to choose actions based on vectorial Q-value estimates.
         It is implemented as a class due to the dynamic nature of the utopian point."""
     
-    def __init__(self, initial_utopian: torch.Tensor, threshold_value: float) -> None:
-        self.z_star = initial_utopian #initialise utopian point z*. It is a vector with the same dimensions as the vectorial Q-values
+    def __init__(self, initial_utopian: torch.Tensor, threshold_value: float, device = torch.device("cuda" if torch.cuda.is_available() else "cpu")) -> None:
+        self.device = device
+        self.z_star = initial_utopian.to(device) #initialise utopian point z*. It is a vector with the same dimensions as the vectorial Q-values
         self.threshold = threshold_value
 
     def scalarise_actions(self, action_q_estimates: torch.Tensor, objective_weights: torch.Tensor) -> torch.Tensor:
+        self.update_utopian(action_q_estimates.reshape(-1,self.z_star.shape[0])) #TODO: test if that line results in the action_q_estimates to take on the correct shape
         z_final = (self.z_star + self.threshold).reshape(-1,1)
         diffs = action_q_estimates - z_final
         abs_diffs = torch.abs(diffs)
@@ -26,21 +28,17 @@ class ChebyshevScalarisation:
         sq_values = torch.max(weighted_diffs, dim=1)[0]
         return sq_values
 
-    def update_utopian(self, update_vector: np.ndarray) -> None:
-        self.z_star = np.max([self.z_star, update_vector], axis=0)
+    def update_utopian(self, update_vector: torch.Tensor) -> None:
+        comparison_tensor = torch.vstack([update_vector, self.z_star])
+        self.z_star = torch.max(comparison_tensor, dim=0)[0]
 
-#TEST Chebyshev Scalarisation
-scal = ChebyshevScalarisation(torch.tensor([0,0.01]), 0.01)
-#shape: (num_obs, num_obj, num_actions)
-q_estimates = torch.tensor([[[0.5,0.2,0.3],
-                             [0.1,0.02,0.5]],
+class LinearScalarisation:
 
-                            [[0.1,0.1,0.1],
-                             [0.1,0.1,0.1]]])
-obj_weights = torch.tensor([0.2,0.8])
-
-out = scal.scalarise_actions(q_estimates, obj_weights)
-print(out)
+    def scalarise_actions(self, action_q_estimates, objective_weights):
+        utility_values = action_q_estimates * objective_weights.reshape(-1,1)
+        utility_values = torch.sum(utility_values, dim=1)
+        
+        return utility_values
 
 
 class ReplayBuffer:

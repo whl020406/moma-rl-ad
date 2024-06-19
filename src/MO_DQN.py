@@ -4,10 +4,12 @@ from torch import nn
 from torch import device
 import numpy as np
 from typing import Tuple, Sequence
-from src.utils import ReplayBuffer, random_objective_weights, DataLogger
+from src.utils import ReplayBuffer, random_objective_weights, DataLogger, LinearScalarisation
 from torch.nn.modules.loss import _Loss
 from tqdm import trange
 from typing import List
+from pymoo.util.ref_dirs import get_reference_directions
+
 class DQN_Network(nn.Module):
 
     def __init__(self, n_observations, n_actions, n_objectives):
@@ -39,7 +41,7 @@ class MO_DQN:
         observation_space_shape: Sequence[int] = [1,1], num_objectives: int = 2, num_actions: int = 5, 
         replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, objective_weights: Sequence[float] = None,
         optimiser: torch.optim.Optimizer = torch.optim.SGD, loss_criterion: _Loss = nn.SmoothL1Loss, episode_recording_interval: int = None,
-        objective_names: List[str] = None) -> None:
+        objective_names: List[str] = None, scalarisation_method = LinearScalarisation, scalarisation_argument_list: List = []) -> None:
         
         if objective_names is None:
             objective_names = [f"reward_{x}" for x in range(num_objectives)]
@@ -86,6 +88,9 @@ class MO_DQN:
         feature_names.extend(objective_names)
         self.reward_logger = DataLogger("reward_logger",feature_names)
 
+        #initialise scalarisation function
+        self.scalarisation_method = scalarisation_method(*scalarisation_argument_list)
+
 
     def __create_network(self, num_observations, num_actions, num_objectives) -> Tuple[nn.Module, nn.Module]:
         #create one network for each objective
@@ -114,7 +119,7 @@ class MO_DQN:
         episode_nr = 0
         num_of_conducted_optimisation_steps = 0
         #take step in environment
-        for i in trange(num_iterations, desc="Iterations", mininterval=2):
+        for i in trange(num_iterations, desc="Training iterations", mininterval=2):
             self.action = self.act(self.obs, eps_greedy=True)
             self.reduce_epsilon(num_iterations, epsilon_start, epsilon_end) #linearly reduce the value of epsilon
             (
@@ -200,15 +205,27 @@ class MO_DQN:
             with torch.no_grad():
                 self.policy_net.eval()
                 q_values = self.policy_net(obs)
-                utility_values = q_values * self.objective_weights.reshape(-1,1)
-                utility_values = torch.sum(utility_values, dim=1)
-                action = torch.argmax(utility_values).item()
+                scalarised_values = self.scalarisation_method.scalarise_actions(q_values, self.objective_weights)
+                action = torch.argmax(scalarised_values).item()
 
         else: # choose random action
             action = self.rng.choice(self.num_actions)
 
         return action
     
+
+    def evaluate(self, num_episodes, num_points: int = 66, num_repetitions: int = 5, seed: int = None):
+        """ Evaluates the performance of the trained network by conducting num_episodes episodes for each objective weights tuple. 
+            the parameter num_points determines how many points in the objective-weight space are being explored. These weights
+            are spaced equally according to using the pymoo implementation: https://pymoo.org/misc/reference_directions.html.
+            The recorded rewards for a specific tuple of objective weights are averaged over num_repetitions episodes"""
+        
+        #get equally spaced objective weights
+        objective_weights = get_reference_directions("energy", n_dim = self.num_objectives, n_points = num_points, seed=seed)
+
+        for i in trange(num_episodes, desc="Evaluation episodes", mininterval=2):
+            pass #TODO: conduct an episode, keep track of rewards and weights
+
     def reduce_epsilon(self, max_iteration, eps_start, eps_end):
         self.epsilon = self.epsilon - (eps_start-eps_end)/max_iteration
 
