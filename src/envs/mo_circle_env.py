@@ -13,9 +13,9 @@ class MOCircleEnv(CircleEnv):
         config.update(
             {
             "collision_reward": -1,
-            "high_speed_reward": 0.2,
+            "high_speed_reward": 1,
             "lane_change_reward": -0.05,
-            "energy_consumption_reward": 0.2,
+            "energy_consumption_reward": 1,
             "normalize_reward": True,
             #add energy reward
             #add lane reward

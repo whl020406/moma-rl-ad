@@ -3,6 +3,7 @@ import numpy as np
 from collections import namedtuple
 from typing import List
 from highway_env.vehicle.kinematics import Vehicle
+from pymoo.indicators.hv import HV
 import pandas as pd
 
 
@@ -118,6 +119,10 @@ def random_objective_weights(num_objectives: int, rng: np.random.Generator, devi
     random_weights = torch.tensor(random_weights / np.sum(random_weights), device=device) #normalise the random weights
     return random_weights
 
+
+def calc_hypervolume(reference_point, reward_vector):
+    ind = HV(ref_point=reference_point)
+    return ind(reward_vector)
 
 def calc_energy_efficiency(vehicle: Vehicle, type='light_passenger',fuel='gasoline', normalise: bool = False):
     ''' Calculates the difference between maximum and current CO2 emmissions, 

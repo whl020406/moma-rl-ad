@@ -213,18 +213,29 @@ class MO_DQN:
 
         return action
     
-
-    def evaluate(self, num_episodes, num_points: int = 66, num_repetitions: int = 5, seed: int = None):
-        """ Evaluates the performance of the trained network by conducting num_episodes episodes for each objective weights tuple. 
+    def evaluate(self, num_repetitions: int = 5, num_points: int = 66, hv_reference_point: np.ndarray = None, seed: int = None):
+        """ Evaluates the performance of the trained network by conducting num_repetitions episodes for each objective weights tuple. 
             the parameter num_points determines how many points in the objective-weight space are being explored. These weights
-            are spaced equally according to using the pymoo implementation: https://pymoo.org/misc/reference_directions.html.
-            The recorded rewards for a specific tuple of objective weights are averaged over num_repetitions episodes"""
+            are spaced equally according to the pymoo implementation: https://pymoo.org/misc/reference_directions.html.
+            The recorded rewards for a specific tuple of objective weights divided by the maximum number of iterations within the episode
+            to have an upper bound of 1. Each of the num_repetitions runs is returned but it is recommended to report on the average 
+            to obtain a less biased result.
+            The hv_reference_point is a vector specifying the best possible vectorial reward vector."""
         
         #get equally spaced objective weights
         objective_weights = get_reference_directions("energy", n_dim = self.num_objectives, n_points = num_points, seed=seed)
-
-        for i in trange(num_episodes, desc="Evaluation episodes", mininterval=2):
-            pass #TODO: conduct an episode, keep track of rewards and weights
+        eval_logger = DataLogger("evaluation_logger",["repetition_number", "weight_index","weight_tuple","normalised_reward","raw_reward"])
+        for tuple_index, weight_tuple in trange(enumerate(objective_weights), desc="Weight tuple", mininterval=1):
+            for repetition_nr in trange(num_repetitions, desc="Evaluation episodes", mininterval=2):
+                terminated = False
+                truncated = False
+                print(self.env.reset())
+                while ~(terminated or truncated):
+                    #select action based on obs. Execute action, add up reward, next iteration
+                    pass
+                pass #divide sum of rewards by maximum number of iterations, record reward
+        
+        return eval_logger.to_dataframe()
 
     def reduce_epsilon(self, max_iteration, eps_start, eps_end):
         self.epsilon = self.epsilon - (eps_start-eps_end)/max_iteration
