@@ -47,6 +47,7 @@ class MO_DQN:
             objective_names = [f"reward_{x}" for x in range(num_objectives)]
         
         assert len(objective_names) == num_objectives, "The number of elements in the objective_names list must be equal to the number of objectives!"
+        self.objective_names = objective_names
 
         self.env = env
         self.recording_interval = episode_recording_interval
@@ -85,7 +86,7 @@ class MO_DQN:
 
         #initialise reward logger
         feature_names = ["episode"]
-        feature_names.extend(objective_names)
+        feature_names.extend(self.objective_names)
         self.reward_logger = DataLogger("reward_logger",feature_names)
 
         #initialise scalarisation function
@@ -133,7 +134,7 @@ class MO_DQN:
             accumulated_rewards = accumulated_rewards + self.reward
 
             #cast return values to gpu tensor before storing them in replay buffer
-            self.next_obs = torch.tensor(self.next_obs[0], device=self.device) #TODO: remove when going to multi-agent
+            self.next_obs = torch.tensor(self.next_obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
             if self.num_objectives == 1:
                 self.reward = [self.reward]
             self.reward = torch.tensor(self.reward, device=self.device)
@@ -141,7 +142,7 @@ class MO_DQN:
             self.terminated = torch.tensor([self.terminated], device=self.device)
             #push to replay buffer
             self.buffer.push(self.obs, self.action, self.next_obs, self.reward, self.terminated)
-
+            self.obs = self.next_obs #use next_obs as obs during the next iteration
             #update the weights every optimisation_frequency steps
             if (i % inv_optimisation_frequency) == 0:
                 self.__update_weights(num_of_conducted_optimisation_steps, inv_target_update_frequency)
@@ -222,26 +223,53 @@ class MO_DQN:
             to obtain a less biased result.
             The hv_reference_point is a vector specifying the best possible vectorial reward vector."""
         
+        
+        self.rng = np.random.default_rng(seed)
+        max_iterations_per_episode = self.env.config["duration"]
         #get equally spaced objective weights
         objective_weights = get_reference_directions("energy", n_dim = self.num_objectives, n_points = num_points, seed=seed)
-        eval_logger = DataLogger("evaluation_logger",["repetition_number", "weight_index","weight_tuple","normalised_reward","raw_reward"])
-        for tuple_index, weight_tuple in trange(enumerate(objective_weights), desc="Weight tuple", mininterval=1):
-            for repetition_nr in trange(num_repetitions, desc="Evaluation episodes", mininterval=2):
-                terminated = False
-                truncated = False
-                print(self.env.reset())
-                while ~(terminated or truncated):
-                    #select action based on obs. Execute action, add up reward, next iteration
-                    pass
-                pass #divide sum of rewards by maximum number of iterations, record reward
+        objective_weights = torch.from_numpy(objective_weights).to(self.device)
         
+        feature_names = ["repetition_number", "weight_index","weight_tuple"]
+        feature_names.extend([f"normalised_{x}" for x in self.objective_names])
+        feature_names.extend([f"raw_{x}" for x in self.objective_names])
+        eval_logger = DataLogger("evaluation_logger",feature_names)
+        
+        for tuple_index in trange(objective_weights.shape[0], desc="Weight tuple", mininterval=1):#
+            weight_tuple = objective_weights[tuple_index]
+            self.objective_weights = weight_tuple
+            
+            for repetition_nr in range(num_repetitions):
+                self.terminated = False
+                self.truncated = False
+                self.obs, _ = self.env.reset()                
+                accumulated_reward = np.zeros(self.num_objectives)
+                blubb = 0
+                while not (self.terminated or self.truncated):
+                    #select action based on obs. Execute action, add up reward, next iteration
+                    self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
+                    self.action = self.act(self.obs)
+                    (
+                    self.obs,
+                    self.reward,
+                    self.terminated,
+                    self.truncated,
+                    info,
+                    ) = self.env.step(self.action)
+                    
+                    accumulated_reward = accumulated_reward + self.reward
+
+                #episode ended
+                normalised_reward = accumulated_reward / max_iterations_per_episode
+                eval_logger.add(repetition_nr, tuple_index, weight_tuple.tolist(), *normalised_reward.tolist(), *accumulated_reward.tolist())
+                
         return eval_logger.to_dataframe()
 
     def reduce_epsilon(self, max_iteration, eps_start, eps_end):
         self.epsilon = self.epsilon - (eps_start-eps_end)/max_iteration
 
-    def set_objective_weights(self, weights: np.ndarray):
-        self.objective_weights = weights
+    def set_objective_weights(self, weights: torch.Tensor):
+        self.objective_weights = weights.to(self.device)
 
     def store_network_weights(self, model_path: str, model_name: str):
         torch.save(self.policy_net.state_dict(), f"{model_path}_{model_name}")

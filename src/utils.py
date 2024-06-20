@@ -21,11 +21,13 @@ class ChebyshevScalarisation:
         self.threshold = threshold_value
 
     def scalarise_actions(self, action_q_estimates: torch.Tensor, objective_weights: torch.Tensor) -> torch.Tensor:
-        self.update_utopian(action_q_estimates.reshape(-1,self.z_star.shape[0])) #TODO: test if that line results in the action_q_estimates to take on the correct shape
-        z_final = (self.z_star + self.threshold).reshape(-1,1)
+        action_q_estimates = torch.swapaxes(action_q_estimates,1,2) #swap axes so that rows represent q estimates of one action for all objectives
+        action_q_estimates = action_q_estimates.flatten(start_dim=0, end_dim=1)
+        self.update_utopian(action_q_estimates)
+        z_final = (self.z_star + self.threshold)#.reshape(-1,1)
         diffs = action_q_estimates - z_final
         abs_diffs = torch.abs(diffs)
-        weighted_diffs = objective_weights.reshape(-1,1) * abs_diffs
+        weighted_diffs = objective_weights * abs_diffs#.reshape(-1,1) * abs_diffs
         sq_values = torch.max(weighted_diffs, dim=1)[0]
         return sq_values
 
@@ -121,6 +123,7 @@ def random_objective_weights(num_objectives: int, rng: np.random.Generator, devi
 
 
 def calc_hypervolume(reference_point, reward_vector):
+    '''reference point represents the worst possible value'''
     reward_vector = reward_vector * (-1) # convert to minimisation problem
     ind = HV(ref_point=reference_point)
     return ind(reward_vector)
