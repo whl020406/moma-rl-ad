@@ -137,11 +137,11 @@ def calc_energy_efficiency(vehicle: Vehicle, type='light_passenger',fuel='gasoli
     curr_ac = vehicle.action['acceleration'] 
     curr_speed = vehicle.speed
 
-    # maximum possible acceleration computed using the formula found in ControlledVehicle class of highway-env
-    max_acc = vehicle.KP_A * (vehicle.MAX_SPEED - vehicle.MIN_SPEED)
-    max_speed = vehicle.MAX_SPEED
+    # maximum possible acceleration for the current speed
+    # computed using the formula found in ControlledVehicle class of highway-env
+    max_acc = vehicle.KP_A * (vehicle.MAX_SPEED - curr_speed)
 
-    max_energy_consumption = compute_co2_emission(max_acc, max_speed)
+    max_energy_consumption = compute_co2_emission(max_acc, curr_speed)
     current_energy_consumption = compute_co2_emission(curr_ac, curr_speed)
 
     efficiency = max_energy_consumption - current_energy_consumption
@@ -156,7 +156,12 @@ def calc_energy_efficiency(vehicle: Vehicle, type='light_passenger',fuel='gasoli
 def compute_co2_emission(acceleration, velocity, type='light_passenger',fuel='gasoline'):
     '''Code taken from: https://github.com/amrzr/SA-MOEAMOPG/blob/55ceddc58062f2d7d26107d7813d2dd7328f2203/SAMOEA_PGMORL/highway_env/envs/two_way_env.py#L139C1-L209C22.
         Equation is described in: https://journals.sagepub.com/doi/full/10.1177/0361198119839970'''
-     
+    
+    #clip acceleration to minimum value of 0 because breaking would 
+    #result in the same instantateous energy efficiency as not accelerating
+    if acceleration < 0:
+        acceleration = 0
+
     if fuel == 'gasoline':
         T_idle = 2392    # CO2 emission from gasoline [gCO2/L]
         E_gas =  31.5e6  # Energy in gasoline [J\L]

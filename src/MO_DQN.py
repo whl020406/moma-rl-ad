@@ -244,7 +244,6 @@ class MO_DQN:
                 self.truncated = False
                 self.obs, _ = self.env.reset()                
                 accumulated_reward = np.zeros(self.num_objectives)
-                blubb = 0
                 while not (self.terminated or self.truncated):
                     #select action based on obs. Execute action, add up reward, next iteration
                     self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
