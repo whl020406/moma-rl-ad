@@ -23,16 +23,16 @@ class CircleEnv(AbstractEnv):
             "normalize_reward": True,
             "fixed_centering_position":np.array([0,10])
             })
-        config["inner_lane_radius"] = 60
+        config["inner_lane_radius"] = 40
         config["num_lanes"] = 3
-        config["vehicles_count"] = 12
+        config["vehicles_count"] = 6
         config["controlled_vehicles"] = 1
         config["vehicles_density"] = 0.1
         config["max_speed"] = 10
         config["min_speed"] = 2
         config["lane_width"] = 6
 
-        config["normalize_reward"] = False
+        config["normalize_reward"] = True
         config["action"] = {"type": "DiscreteMetaAction", "target_speeds": np.linspace(config["min_speed"], config["max_speed"], endpoint=True, num=5), "lateral":True}
         return config
 

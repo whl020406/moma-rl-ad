@@ -4,7 +4,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 from src import __init__ #initialises important packages / environments
 
-env = mo_gym.make('mo-circle-env-v0', render_mode='rgb_array')
+env = gym.make('mo-highway-env-v0', render_mode='rgb_array')
 env.unwrapped.configure({
     "screen_width": 500,
     "screen_height": 500,

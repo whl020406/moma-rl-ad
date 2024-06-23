@@ -221,7 +221,7 @@ class MO_DQN:
         
         if episode_recording_interval is not None:
             self.eval_env = RecordVideoV0(self.env, video_folder="videos", name_prefix="training_MODQN", 
-                                                episode_trigger=lambda x: x % self.recording_interval == 0, fps=30)
+                                                episode_trigger=lambda x: x % episode_recording_interval == 0, fps=30)
         
         self.rng = np.random.default_rng(seed)
         #get equally spaced objective weights
