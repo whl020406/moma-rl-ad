@@ -128,7 +128,7 @@ def calc_hypervolume(reference_point, reward_vector):
     ind = HV(ref_point=reference_point)
     return ind(reward_vector)
 
-def calc_energy_efficiency(vehicle: Vehicle, type='light_passenger',fuel='gasoline', normalise: bool = False):
+def calc_energy_efficiency(vehicle: Vehicle, type='light_passenger',fuel='gasoline', normalise: bool = False, max_energy_consumption: float = 1):
     ''' Calculates the difference between maximum and current CO2 emmissions, 
         which is taken as a means of measuring the energy efficiency.
         Meaning: poor energy efficiency --> close to 0, great efficiency --> close to value 1 (for normalise = True)
@@ -139,9 +139,7 @@ def calc_energy_efficiency(vehicle: Vehicle, type='light_passenger',fuel='gasoli
 
     # maximum possible acceleration for the current speed
     # computed using the formula found in ControlledVehicle class of highway-env
-    max_acc = vehicle.KP_A * (vehicle.MAX_SPEED - curr_speed)
 
-    max_energy_consumption = compute_co2_emission(max_acc, curr_speed)
     current_energy_consumption = compute_co2_emission(curr_ac, curr_speed)
 
     efficiency = max_energy_consumption - current_energy_consumption
@@ -194,3 +192,17 @@ def compute_co2_emission(acceleration, velocity, type='light_passenger',fuel='ga
         E = Ei/fuel_eff
 
     return np.abs(E)
+
+
+def compute_max_energy_consumption(vehicle: Vehicle):
+    speeds = vehicle.target_speeds
+    max_energy = 0
+    for speed in speeds:
+        #compute max co2 emmission based on specific speed
+        max_acc = vehicle.KP_A * (vehicle.MAX_SPEED - speed)
+        energy = compute_co2_emission(max_acc, speed)
+
+        #update max value
+        if energy > max_energy:
+            max_energy = energy
+    return max_energy

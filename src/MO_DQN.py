@@ -1,4 +1,5 @@
 import gymnasium as gym
+from gymnasium.experimental.wrappers import RecordVideoV0
 import torch
 from torch import nn
 from torch import device
@@ -40,7 +41,7 @@ class MO_DQN:
     def __init__(self, env: gym.Env | None, device: device = None, seed: int | None = None, 
         observation_space_shape: Sequence[int] = [1,1], num_objectives: int = 2, num_actions: int = 5, 
         replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, objective_weights: Sequence[float] = None,
-        optimiser: torch.optim.Optimizer = torch.optim.SGD, loss_criterion: _Loss = nn.SmoothL1Loss, episode_recording_interval: int = None,
+        optimiser: torch.optim.Optimizer = torch.optim.SGD, loss_criterion: _Loss = nn.SmoothL1Loss,
         objective_names: List[str] = None, scalarisation_method = LinearScalarisation, scalarisation_argument_list: List = []) -> None:
         
         if objective_names is None:
@@ -50,11 +51,6 @@ class MO_DQN:
         self.objective_names = objective_names
 
         self.env = env
-        self.recording_interval = episode_recording_interval
-        if episode_recording_interval is not None:
-            self.env = gym.wrappers.RecordVideo(self.env, video_folder="videos", name_prefix="training_MODQN", 
-                                                episode_trigger=lambda x: x % self.recording_interval == 0)
-            self.env.metadata["render_fps"] = 30
             
         self.rng = np.random.default_rng(seed)
         torch.manual_seed(seed)
@@ -214,7 +210,7 @@ class MO_DQN:
 
         return action
     
-    def evaluate(self, num_repetitions: int = 5, num_points: int = 66, hv_reference_point: np.ndarray = None, seed: int = None):
+    def evaluate(self, num_repetitions: int = 5, num_points: int = 66, hv_reference_point: np.ndarray = None, seed: int = None, episode_recording_interval: int = None):
         """ Evaluates the performance of the trained network by conducting num_repetitions episodes for each objective weights tuple. 
             the parameter num_points determines how many points in the objective-weight space are being explored. These weights
             are spaced equally according to the pymoo implementation: https://pymoo.org/misc/reference_directions.html.
@@ -223,14 +219,16 @@ class MO_DQN:
             to obtain a less biased result.
             The hv_reference_point is a vector specifying the best possible vectorial reward vector."""
         
+        if episode_recording_interval is not None:
+            self.eval_env = RecordVideoV0(self.env, video_folder="videos", name_prefix="training_MODQN", 
+                                                episode_trigger=lambda x: x % self.recording_interval == 0, fps=30)
         
         self.rng = np.random.default_rng(seed)
-        max_iterations_per_episode = self.env.config["duration"]
         #get equally spaced objective weights
         objective_weights = get_reference_directions("energy", n_dim = self.num_objectives, n_points = num_points, seed=seed)
         objective_weights = torch.from_numpy(objective_weights).to(self.device)
         
-        feature_names = ["repetition_number", "weight_index","weight_tuple"]
+        feature_names = ["repetition_number", "weight_index","weight_tuple", "num_iterations"]
         feature_names.extend([f"normalised_{x}" for x in self.objective_names])
         feature_names.extend([f"raw_{x}" for x in self.objective_names])
         eval_logger = DataLogger("evaluation_logger",feature_names)
@@ -242,8 +240,9 @@ class MO_DQN:
             for repetition_nr in range(num_repetitions):
                 self.terminated = False
                 self.truncated = False
-                self.obs, _ = self.env.reset()                
+                self.obs, _ = self.eval_env.reset()                
                 accumulated_reward = np.zeros(self.num_objectives)
+                curr_num_iterations = 0
                 while not (self.terminated or self.truncated):
                     #select action based on obs. Execute action, add up reward, next iteration
                     self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
@@ -254,13 +253,14 @@ class MO_DQN:
                     self.terminated,
                     self.truncated,
                     info,
-                    ) = self.env.step(self.action)
+                    ) = self.eval_env.step(self.action)
                     
                     accumulated_reward = accumulated_reward + self.reward
+                    curr_num_iterations += 1
 
                 #episode ended
-                normalised_reward = accumulated_reward / max_iterations_per_episode
-                eval_logger.add(repetition_nr, tuple_index, weight_tuple.tolist(), *normalised_reward.tolist(), *accumulated_reward.tolist())
+                normalised_reward = accumulated_reward / curr_num_iterations
+                eval_logger.add(repetition_nr, tuple_index, weight_tuple.tolist(), curr_num_iterations, *normalised_reward.tolist(), *accumulated_reward.tolist())
                 
         return eval_logger.to_dataframe()
 
