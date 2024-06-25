@@ -5,6 +5,131 @@ from typing import List
 from highway_env.vehicle.kinematics import Vehicle
 from pymoo.indicators.hv import HV
 import pandas as pd
+from highway_env.envs.common.observation import KinematicObservation, ObservationType
+from gymnasium import spaces
+from typing import List, Dict, TYPE_CHECKING, Optional, Union, Tuple
+
+if TYPE_CHECKING:
+    from highway_env.envs.common.abstract import AbstractEnv
+
+
+class AugmentedMultiAgentObservation(ObservationType):
+    '''Extends the MultiAgentObservation class to work with AugmentedKinematicObservation.
+       Code is taken directly from the MultiAgentObservation class featured in highway_env and is 
+       slightly modified by explicitly setting the obs_type to AugmentedKinematicObservation.'''
+    
+    def __init__(self,
+                 env: 'AbstractEnv',
+                 observation_config: dict,
+                 **kwargs) -> None:
+        super().__init__(env)
+        self.observation_config = observation_config
+        self.agents_observation_types = []
+        for vehicle in self.env.controlled_vehicles:
+            obs_type = AugmentedKinematicObservation(env, **observation_config)
+            obs_type.observer_vehicle = vehicle
+            self.agents_observation_types.append(obs_type)
+
+    def space(self) -> spaces.Space:
+        return spaces.Tuple([obs_type.space() for obs_type in self.agents_observation_types])
+
+    def observe(self) -> tuple:
+        return tuple(obs_type.observe() for obs_type in self.agents_observation_types)
+
+
+class AugmentedKinematicObservation(KinematicObservation):
+    '''Extends the KinematicObservation class to include the objective weights in a two-objective setting.
+       Code is taken directly from the KinematicObservation class featured in highway_env and is modified at 
+       various points.'''
+
+
+    FEATURES: List[str] = ['presence', 'x', 'y', 'vx', 'vy']
+
+    def __init__(self, env: 'AbstractEnv',
+                 features: List[str] = None,
+                 vehicles_count: int = 5,
+                 features_range: Dict[str, List[float]] = None,
+                 absolute: bool = False,
+                 order: str = "sorted",
+                 normalize: bool = True,
+                 clip: bool = True,
+                 see_behind: bool = False,
+                 observe_intentions: bool = False,
+                 num_objectives: int = 2,
+                 **kwargs: dict) -> None:
+        """
+        :param env: The environment to observe
+        :param features: Names of features used in the observation
+        :param vehicles_count: Number of observed vehicles
+        :param features_range: a dict mapping a feature name to [min, max] values
+        :param absolute: Use absolute coordinates
+        :param order: Order of observed vehicles. Values: sorted, shuffled
+        :param normalize: Should the observation be normalized
+        :param clip: Should the value be clipped in the desired range
+        :param see_behind: Should the observation contains the vehicles behind
+        :param observe_intentions: Observe the destinations of other vehicles
+        :param num_objectives: number of objectives whose weights to include in the observation
+        """
+        super().__init__(env)
+        self.num_objectives = num_objectives #add num objectives for use in space function
+        self.features = features or self.FEATURES
+        self.vehicles_count = vehicles_count
+        self.features_range = features_range
+        self.absolute = absolute
+        self.order = order
+        self.normalize = normalize
+        self.clip = clip
+        self.see_behind = see_behind
+        self.observe_intentions = observe_intentions
+
+    def space(self) -> spaces.Space:
+        return spaces.Box(shape=(self.vehicles_count, len(self.features)+self.num_objectives), low=-np.inf, high=np.inf, dtype=np.float32)
+
+    def observe(self) -> np.ndarray:
+        if not self.env.road:
+            return np.zeros(self.space().shape)
+
+        # Add ego-vehicle
+        df = pd.DataFrame.from_records([self.observer_vehicle.to_dict()])[self.features] #add standard features
+
+        #add objective weights features
+        obj_dict = {f"objective_weights_{n}": float(w) for n, w in enumerate(self.observer_vehicle.objective_weights)}
+        obj_df = pd.DataFrame.from_records([obj_dict])
+        df = pd.concat([df,obj_df], axis=1)
+        
+        # Add nearby traffic
+        close_vehicles = self.env.road.close_vehicles_to(self.observer_vehicle,
+                                                         self.env.PERCEPTION_DISTANCE,
+                                                         count=self.vehicles_count - 1,
+                                                         see_behind=self.see_behind,
+                                                         sort=self.order == "sorted")
+        if close_vehicles:
+            origin = self.observer_vehicle if not self.absolute else None
+            others_standard_df = pd.DataFrame.from_records(
+                [v.to_dict(origin, observe_intentions=self.observe_intentions)
+                 for v in close_vehicles[-self.vehicles_count + 1:]])[self.features]
+            
+            #add objective weights features
+            obj_dict_list = [{f"objective_weights_{n}": float(w) for n, w in enumerate(v.objective_weights)} 
+                             for v in close_vehicles[-self.vehicles_count + 1:]]
+            others_obj_weights_df = pd.DataFrame.from_records(obj_dict_list)
+
+            others_df = pd.concat([others_standard_df, others_obj_weights_df], axis = 1)
+            df = pd.concat([df,others_df], axis=0, ignore_index=True)
+        # Normalize and clip
+        if self.normalize:
+            df = self.normalize_obs(df)
+        # Fill missing rows
+        if df.shape[0] < self.vehicles_count:
+            rows = np.zeros((self.vehicles_count - df.shape[0], len(self.features)))
+            df = pd.concat([df, pd.DataFrame(data=rows, columns=self.features)], ignore_index=True)
+        # Reorder
+        obs = df.values.copy()
+        if self.order == "shuffled":
+            self.env.np_random.shuffle(obs[1:])
+        # Flatten
+        return obs.astype(self.space().dtype)
+
 
 
 class ChebyshevScalarisation:

@@ -6,9 +6,14 @@ from highway_env.vehicle.controller import MDPVehicle
 from highway_env.vehicle.kinematics import Vehicle
 from highway_env.envs.common.action import Action
 from highway_env.vehicle.controller import ControlledVehicle
-from utils import calc_energy_efficiency, compute_max_energy_consumption
+from highway_env.utils import near_split
+from utils import calc_energy_efficiency, compute_max_energy_consumption, random_objective_weights
+import torch
 
 class MOHighwayEnv(HighwayEnv):
+    '''Extends the standard highway environment to work with multiple objectives. The code was taken straight
+    from the HighwayEnv class of the highway_env module and adjusted at various points.'''
+
     @classmethod
     def default_config(cls) -> dict:
         config = super().default_config()
@@ -21,7 +26,7 @@ class MOHighwayEnv(HighwayEnv):
             },
             "lanes_count": 4,
             "vehicles_count": 50,
-            "controlled_vehicles": 1,
+            "controlled_vehicles": 2,
             "initial_lane_id": None,
             "duration": 40,  # [s]
             "ego_spacing": 2,
@@ -35,7 +40,9 @@ class MOHighwayEnv(HighwayEnv):
             "energy_consumption_reward": 1,
             "reward_speed_range": [20, 30],
             "normalize_reward": True,
-            "offroad_terminal": False
+            "offroad_terminal": False,
+            "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"), #uses GPU if possible
+            "rng": np.random.default_rng(None) #sets random seed for rng by default
         })
         return config
 
@@ -75,3 +82,37 @@ class MOHighwayEnv(HighwayEnv):
             "high_speed_reward": np.clip(scaled_speed, 0, 1),
             "energy_consumption_reward": calc_energy_efficiency(self.vehicle, normalise=self.config["normalize_reward"], max_energy_consumption=self.max_energy_consumption)
         }
+    
+    def _create_vehicles(self) -> None:
+        """Create some new random vehicles of a given type, and add them on the road."""
+        other_vehicles_type = utils.class_from_path(self.config["other_vehicles_type"])
+        other_per_controlled = near_split(self.config["vehicles_count"], num_bins=self.config["controlled_vehicles"])
+
+        self.controlled_vehicles = []
+        
+        for others in other_per_controlled:
+            #controlled vehicle
+            vehicle = Vehicle.create_random(
+                self.road,
+                speed=25,
+                lane_id=self.config["initial_lane_id"],
+                spacing=self.config["ego_spacing"]
+            )
+            vehicle = self.action_type.vehicle_class(self.road, vehicle.position, vehicle.heading, vehicle.speed)
+            
+            #set random objective weights for controlled vehicles (2-objectives)
+            #can be overriden during training by the MOMA-RL-algorithm
+            vehicle.objective_weights = random_objective_weights(num_objectives=2, rng = self.config["rng"], device= self.config["device"])
+            
+            #add controlled vehicle to list
+            self.controlled_vehicles.append(vehicle)
+            self.road.vehicles.append(vehicle)
+
+            #uncontrolled vehicles (non-autonomous)
+            for _ in range(others):
+                vehicle = other_vehicles_type.create_random(self.road, spacing=1 / self.config["vehicles_density"])
+                vehicle.randomize_behavior()
+
+                #set weights of 0.5 for each objective for uncontrolled vehicles (2-objectives)
+                vehicle.objective_weights = torch.tensor([0.5,0.5], device=self.config["device"])
+                self.road.vehicles.append(vehicle)
