@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from collections import namedtuple
-from typing import List
+from typing import List, Callable
 from highway_env.vehicle.kinematics import Vehicle
 from pymoo.indicators.hv import HV
 import pandas as pd
@@ -318,16 +318,36 @@ def compute_co2_emission(acceleration, velocity, type='light_passenger',fuel='ga
 
     return np.abs(E)
 
-
-def compute_max_energy_consumption(vehicle: Vehicle):
+def compute_max_energy_consumption(vehicle: Vehicle, energy_consumption_function: Callable):
     speeds = vehicle.target_speeds
     max_energy = 0
     for speed in speeds:
         #compute max co2 emmission based on specific speed
         max_acc = vehicle.KP_A * (vehicle.MAX_SPEED - speed)
-        energy = compute_co2_emission(max_acc, speed)
+        energy = energy_consumption_function(max_acc, speed)
 
         #update max value
         if energy > max_energy:
             max_energy = energy
     return max_energy
+
+
+def compute_naive_energy_efficiency(vehicle: Vehicle, max_energy_consumption: float = 1):
+    curr_ac = vehicle.action['acceleration']
+    eps = 0.01
+
+    #forward speed according to https://github.com/eleurent/highway-env/issues/268
+    curr_forward_speed = vehicle.speed * np.cos(vehicle.heading) 
+
+    energy_consumption = (curr_forward_speed ** 3) * (1+np.clip(curr_ac,0))
+
+    #no energy consumed while idling
+    if curr_ac < -eps:
+        energy_consumption = 0
+    
+    #normalisation
+    energy_efficiency = (max_energy_consumption - energy_consumption) / max_energy_consumption
+
+    return energy_efficiency
+
+
