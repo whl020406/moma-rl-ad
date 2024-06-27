@@ -12,13 +12,12 @@ from typing import List
 from pymoo.util.ref_dirs import get_reference_directions
 from DQN_Network import DQN_Network
 
-
-
-
-class MO_DQN:
+class MOMA_DQN:
     """ 
-    Implements multi-objective DQN working with one agent. Code is based on:
-    https://github.com/LucasAlegre/morl-baselines/blob/main/morl_baselines/single_policy/ser/mo_q_learning.py#L152
+    Implements multi-objective multi-agent DQN by extending the code in MO_DQN.py
+    It works by sharing the parameters between agents, adjusting the reward function to include a social and egoistisc term
+    and sharing experiences using a shared replay buffer. The DQN network has access to the objective weights of other autonomous agents
+    and uses a fixed weight of human agents.
     """
 
     def __init__(self, env: gym.Env | None, device: device = None, seed: int | None = None, 
