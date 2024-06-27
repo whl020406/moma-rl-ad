@@ -2,7 +2,7 @@ from typing import Dict, Text
 import numpy as np
 from highway_env import utils
 from highway_env.envs import AbstractEnv, RoadNetwork, Road, LineType, CircularLane
-from utils import calc_energy_efficiency, compute_max_energy_consumption
+from utils import random_objective_weights
 from circle_env import CircleEnv
 from highway_env.vehicle.controller import MDPVehicle
 

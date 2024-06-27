@@ -7,8 +7,9 @@ from highway_env.vehicle.kinematics import Vehicle
 from highway_env.envs.common.action import Action
 from highway_env.vehicle.controller import ControlledVehicle
 from highway_env.utils import near_split
-from utils import calc_energy_efficiency, compute_max_energy_consumption, random_objective_weights
+from energy_calculation import NaiveEnergyCalculation
 import torch
+from utils import random_objective_weights
 
 class MOHighwayEnv(HighwayEnv):
     '''Extends the standard highway environment to work with multiple objectives. The code was taken straight
@@ -42,6 +43,7 @@ class MOHighwayEnv(HighwayEnv):
             "normalize_reward": True,
             "offroad_terminal": False,
             "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"), #uses GPU if possible
+            "energy_consumption_function": NaiveEnergyCalculation,
             "rng": np.random.default_rng(None) #sets random seed for rng by default
         })
         return config
@@ -52,23 +54,28 @@ class MOHighwayEnv(HighwayEnv):
         rewards = {
             name: self.config.get(name, 0) * reward for name, reward in rewards.items()
         }
-        speed_reward = rewards["high_speed_reward"] + rewards["collision_reward"] + rewards["right_lane_reward"]
-        energy_reward = rewards["energy_consumption_reward"] + rewards["collision_reward"] + rewards["right_lane_reward"]
+        speed_reward = rewards["high_speed_reward"] + rewards["right_lane_reward"]
+        energy_reward = rewards["energy_consumption_reward"] + rewards["right_lane_reward"]
+        if rewards["collision_reward"] != 0:
+            speed_reward = 0
+            energy_reward = 0
+        
         if self.config["normalize_reward"]:
             speed_reward = utils.lmap(speed_reward,
-                                [self.config["collision_reward"],
+                                [0,
                                     self.config["high_speed_reward"] + self.config["right_lane_reward"]],
                                 [0, 1])
             energy_reward = utils.lmap(energy_reward,
-                                [self.config["collision_reward"],
+                                [0,
                                     self.config["energy_consumption_reward"] + self.config["right_lane_reward"]],
                                 [0, 1])
+        print(rewards["energy_consumption_reward"])
         return [speed_reward, energy_reward]
 
     def _rewards(self, action: Action) -> Dict[Text, float]:
         #if its the first time this function is called: calculate maximum energy consumption:
-        if not hasattr(self, 'max_energy_consumption'):
-            self.max_energy_consumption = compute_max_energy_consumption(self.vehicle)
+        if not hasattr(self, 'energy_consumption_function'):
+            self.energy_consumption_function = self.config["energy_consumption_function"](self.vehicle.target_speeds, self.vehicle.KP_A)
 
         neighbours = self.road.network.all_side_lanes(self.vehicle.lane_index)
         lane = self.vehicle.target_lane_index[2] if isinstance(self.vehicle, ControlledVehicle) \
@@ -80,7 +87,7 @@ class MOHighwayEnv(HighwayEnv):
             "collision_reward": float(self.vehicle.crashed),
             "right_lane_reward": lane / max(len(neighbours) - 1, 1),
             "high_speed_reward": np.clip(scaled_speed, 0, 1),
-            "energy_consumption_reward": calc_energy_efficiency(self.vehicle, normalise=self.config["normalize_reward"], max_energy_consumption=self.max_energy_consumption)
+            "energy_consumption_reward": self.energy_consumption_function.compute_efficiency(self.vehicle, normalise=self.config["normalize_reward"])
         }
     
     def _create_vehicles(self) -> None:
@@ -105,6 +112,10 @@ class MOHighwayEnv(HighwayEnv):
             vehicle.objective_weights = random_objective_weights(num_objectives=2, rng = self.config["rng"], device= self.config["device"])
             
             #add controlled vehicle to list
+            max_speed = vehicle.target_speeds[-1]
+            min_speed = vehicle.target_speeds[0]
+            vehicle.MAX_SPEED = max_speed
+            vehicle.MIN_SPEED = min_speed
             self.controlled_vehicles.append(vehicle)
             self.road.vehicles.append(vehicle)
 
@@ -114,5 +125,7 @@ class MOHighwayEnv(HighwayEnv):
                 vehicle.randomize_behavior()
 
                 #set weights of 0.5 for each objective for uncontrolled vehicles (2-objectives)
+                vehicle.MAX_SPEED = max_speed
+                vehicle.MIN_SPEED = min_speed
                 vehicle.objective_weights = torch.tensor([0.5,0.5], device=self.config["device"])
                 self.road.vehicles.append(vehicle)
