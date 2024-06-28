@@ -11,6 +11,7 @@ from tqdm import trange
 from typing import List
 from pymoo.util.ref_dirs import get_reference_directions
 from DQN_Network import DQN_Network
+from utils import AugmentedMultiAgentObservation
 
 class MOMA_DQN:
     """ 
@@ -23,7 +24,7 @@ class MOMA_DQN:
     def __init__(self, env: gym.Env | None, device: device = None, seed: int | None = None, 
         observation_space_shape: Sequence[int] = [1,1], num_objectives: int = 2, num_actions: int = 5, 
         replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, objective_weights: Sequence[float] = None,
-        optimiser: torch.optim.Optimizer = torch.optim.SGD, loss_criterion: _Loss = nn.SmoothL1Loss,
+        loss_criterion: _Loss = nn.SmoothL1Loss, observation_space_type = AugmentedMultiAgentObservation,
         objective_names: List[str] = None, scalarisation_method = LinearScalarisation, scalarisation_argument_list: List = []) -> None:
         
         if objective_names is None:
@@ -33,6 +34,9 @@ class MOMA_DQN:
         self.objective_names = objective_names
 
         self.env = env
+        self.env.reset() #make sure reset function has been called at least once so that the observation space type is not reset
+        self.env.unwrapped.observation_type = AugmentedMultiAgentObservation(env = env, **env.unwrapped.config["observation"])
+        self.env.unwrapped.observation_space = env.observation_type.space()
             
         self.rng = np.random.default_rng(seed)
         torch.manual_seed(seed)
@@ -56,7 +60,6 @@ class MOMA_DQN:
         self.rb_size = replay_buffer_size
         self.batch_ratio = batch_ratio
 
-        self.optimiser_class = optimiser
         self.loss_criterion = loss_criterion
 
         #initialise replay buffer
@@ -92,7 +95,7 @@ class MOMA_DQN:
         self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
         self.gamma = gamma
         self.epsilon = epsilon_start
-        self.optimiser = self.optimiser_class(self.policy_net.parameters())
+        self.optimiser = torch.optim.AdamW(self.policy_net.parameters())
         self.loss_func = self.loss_criterion()
         accumulated_rewards = np.zeros(self.num_objectives)
         episode_nr = 0
@@ -201,6 +204,7 @@ class MOMA_DQN:
             to obtain a less biased result.
             The hv_reference_point is a vector specifying the best possible vectorial reward vector."""
         
+        self.eval_env = self.env
         if episode_recording_interval is not None:
             self.eval_env = RecordVideoV0(self.env, video_folder="videos", name_prefix="training_MODQN", 
                                                 episode_trigger=lambda x: x % episode_recording_interval == 0, fps=30)

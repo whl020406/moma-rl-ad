@@ -19,18 +19,18 @@ class CircleEnv(AbstractEnv):
             "screen_width": 600,
             "screen_height": 600,
             "centering_position": [0.5, 0.6],
-            "duration": 100,
+            "duration": 50,
             "normalize_reward": True,
             "fixed_centering_position":np.array([0,10])
             })
-        config["inner_lane_radius"] = 40
+        config["inner_lane_radius"] = 30
         config["num_lanes"] = 3
-        config["vehicles_count"] = 6
+        config["vehicles_count"] = 8
         config["controlled_vehicles"] = 1
-        config["vehicles_density"] = 0.1
+        config["vehicles_density"] = 1
         config["max_speed"] = 10
         config["min_speed"] = 2
-        config["lane_width"] = 6
+        config["lane_width"] = 8
 
         config["normalize_reward"] = True
         config["action"] = {"type": "DiscreteMetaAction", "target_speeds": np.linspace(config["min_speed"], config["max_speed"], endpoint=True, num=5), "lateral":True}

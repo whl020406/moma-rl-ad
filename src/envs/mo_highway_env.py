@@ -26,10 +26,10 @@ class MOHighwayEnv(HighwayEnv):
                 "type": "DiscreteMetaAction",
             },
             "lanes_count": 4,
-            "vehicles_count": 50,
-            "controlled_vehicles": 2,
+            "vehicles_count": 20,
+            "controlled_vehicles": 1,
             "initial_lane_id": None,
-            "duration": 40,  # [s]
+            "duration": 80,  # [s]
             "ego_spacing": 2,
             "vehicles_density": 1,
             "collision_reward": -1,    # The reward received when colliding with a vehicle.
@@ -69,11 +69,10 @@ class MOHighwayEnv(HighwayEnv):
                                 [0,
                                     self.config["energy_consumption_reward"] + self.config["right_lane_reward"]],
                                 [0, 1])
-        print(rewards["energy_consumption_reward"])
-        return [speed_reward, energy_reward]
+        return np.array([speed_reward, energy_reward])
 
     def _rewards(self, action: Action) -> Dict[Text, float]:
-        #if its the first time this function is called: calculate maximum energy consumption:
+        #if its the first time this function is called: initialise energy consumption function
         if not hasattr(self, 'energy_consumption_function'):
             self.energy_consumption_function = self.config["energy_consumption_function"](self.vehicle.target_speeds, self.vehicle.KP_A)
 

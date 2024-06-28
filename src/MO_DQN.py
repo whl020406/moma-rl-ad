@@ -24,7 +24,7 @@ class MO_DQN:
     def __init__(self, env: gym.Env | None, device: device = None, seed: int | None = None, 
         observation_space_shape: Sequence[int] = [1,1], num_objectives: int = 2, num_actions: int = 5, 
         replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, objective_weights: Sequence[float] = None,
-        optimiser: torch.optim.Optimizer = torch.optim.SGD, loss_criterion: _Loss = nn.SmoothL1Loss,
+        loss_criterion: _Loss = nn.SmoothL1Loss,
         objective_names: List[str] = None, scalarisation_method = LinearScalarisation, scalarisation_argument_list: List = []) -> None:
         
         if objective_names is None:
@@ -57,7 +57,6 @@ class MO_DQN:
         self.rb_size = replay_buffer_size
         self.batch_ratio = batch_ratio
 
-        self.optimiser_class = optimiser
         self.loss_criterion = loss_criterion
 
         #initialise replay buffer
@@ -80,8 +79,8 @@ class MO_DQN:
 
         return policy_net, target_net
 
-    def train(self, num_iterations: int = 1000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 5, 
-              gamma: float = 1, epsilon_start: float = 0.05, epsilon_end: float = 0) :
+    def train(self, num_iterations: int = 1000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 20, 
+              gamma: float = 0.9, epsilon_start: float = 0.05, epsilon_end: float = 0) :
         '''
         Runs the training procedure for num_iterations iterations. The inv_optimisation_frequency specifies 
         the number of iterations after which a weight update occurs.The inv_target_update_frequency specifies 
@@ -93,7 +92,8 @@ class MO_DQN:
         self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
         self.gamma = gamma
         self.epsilon = epsilon_start
-        self.optimiser = self.optimiser_class(self.policy_net.parameters())
+        self.optimiser = torch.optim.AdamW(self.policy_net.parameters(), lr=1e-4, amsgrad=True)
+
         self.loss_func = self.loss_criterion()
         accumulated_rewards = np.zeros(self.num_objectives)
         episode_nr = 0
@@ -124,13 +124,15 @@ class MO_DQN:
             self.obs = self.next_obs #use next_obs as obs during the next iteration
             #update the weights every optimisation_frequency steps
             if (i % inv_optimisation_frequency) == 0:
-                self.__update_weights(num_of_conducted_optimisation_steps, inv_target_update_frequency)
+                #Test TODO: remove this line. It is use for testing whether it is better to only start optimising once the buffer is full
+                if self.buffer.num_elements == self.rb_size:
+                    self.__update_weights(num_of_conducted_optimisation_steps, inv_target_update_frequency)
                 num_of_conducted_optimisation_steps += 1
 
             if self.terminated or self.truncated:
                 self.reward_logger.add(episode_nr, *list(accumulated_rewards))
 
-                accumulated_rewards = 0
+                accumulated_rewards = np.zeros(self.num_objectives)
                 episode_nr += 1
                 self.obs, _ = self.env.reset()
                 self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
@@ -141,8 +143,7 @@ class MO_DQN:
     def __update_weights(self, current_optimisation_iteration, inv_target_update_frequency):
         #update normal network each time the function is called
         #update target network every k steps
-        self.policy_net.train()
-        self.target_net.eval()
+
         #fetch samples from replay buffer
         batch_samples = self.buffer.sample(round(self.buffer.num_elements*self.batch_ratio))
         observations = self.buffer.get_observations(batch_samples)
@@ -157,16 +158,18 @@ class MO_DQN:
         state_action_values = self.policy_net(observations)
         state_action_values = state_action_values.gather(2, actions)
         state_action_values = state_action_values.reshape(observations.shape[0],self.num_objectives)
-        next_state_values = self.target_net(next_obs).max(2).values
+        
+        with torch.no_grad():
+            next_state_values = self.target_net(next_obs).max(2).values
         next_state_values[term_flags] = 0
             
         exp_state_action_values = next_state_values * self.gamma + rewards
         #compute loss between estimates and actual values
         loss = self.loss_func(state_action_values, exp_state_action_values)
-
         #backpropagate loss
         self.optimiser.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
         self.optimiser.step()
 
         #update the target networks
@@ -202,6 +205,7 @@ class MO_DQN:
             to obtain a less biased result.
             The hv_reference_point is a vector specifying the best possible vectorial reward vector."""
         
+        self.eval_env = self.env
         if episode_recording_interval is not None:
             self.eval_env = RecordVideoV0(self.env, video_folder="videos", name_prefix="training_MODQN", 
                                                 episode_trigger=lambda x: x % episode_recording_interval == 0, fps=30)
@@ -227,6 +231,8 @@ class MO_DQN:
                 accumulated_reward = np.zeros(self.num_objectives)
                 curr_num_iterations = 0
                 while not (self.terminated or self.truncated):
+                    self.env.render()#test
+
                     #select action based on obs. Execute action, add up reward, next iteration
                     self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
                     self.action = self.act(self.obs)
