@@ -1,7 +1,7 @@
 from typing import Dict, Text
 import numpy as np
 from highway_env import utils
-from highway_env.envs import HighwayEnv
+from highway_env.envs import HighwayEnvFast
 from highway_env.vehicle.controller import MDPVehicle
 from highway_env.vehicle.kinematics import Vehicle
 from highway_env.envs.common.action import Action
@@ -11,7 +11,7 @@ from energy_calculation import NaiveEnergyCalculation
 import torch
 from utils import random_objective_weights
 
-class MOHighwayEnv(HighwayEnv):
+class MOHighwayEnv(HighwayEnvFast):
     '''Extends the standard highway environment to work with multiple objectives. The code was taken straight
     from the HighwayEnv class of the highway_env module and adjusted at various points.'''
 
@@ -33,7 +33,7 @@ class MOHighwayEnv(HighwayEnv):
             "ego_spacing": 2,
             "vehicles_density": 1,
             "collision_reward": -1,    # The reward received when colliding with a vehicle.
-            "right_lane_reward": 0.1,  # The reward received when driving on the right-most lanes, linearly mapped to
+            "right_lane_reward": 0.05,  # The reward received when driving on the right-most lanes, linearly mapped to
                                        # zero for other lanes.
             "high_speed_reward": 1,  # The reward received when driving at full speed, linearly mapped to zero for
                                        # lower speeds according to config["reward_speed_range"].
@@ -59,6 +59,7 @@ class MOHighwayEnv(HighwayEnv):
         if rewards["collision_reward"] != 0:
             speed_reward = 0
             energy_reward = 0
+            return np.array([speed_reward, energy_reward])
         
         if self.config["normalize_reward"]:
             speed_reward = utils.lmap(speed_reward,

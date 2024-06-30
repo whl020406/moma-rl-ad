@@ -10,14 +10,14 @@ from torch.nn.modules.loss import _Loss
 from tqdm import trange
 from typing import List
 from pymoo.util.ref_dirs import get_reference_directions
-from DQN_Network import DQN_Network
+from DQN_Network import Separated_DQN
 
 
 
 
-class MO_DQN:
+class MO_DQN_SEP:
     """ 
-    Implements multi-objective DQN working with one agent. Code is based on:
+    Implements multi-objective DQN working with one agent and separate Networks. Code is based on:
     https://github.com/LucasAlegre/morl-baselines/blob/main/morl_baselines/single_policy/ser/mo_q_learning.py#L152
     """
 
@@ -49,6 +49,7 @@ class MO_DQN:
 
         self.num_actions = num_actions
         self.observation_space_shape = observation_space_shape
+        self.loss_criterion = loss_criterion
 
         (self.policy_net, self.target_net) = \
         self.__create_network(np.cumprod(observation_space_shape)[-1], self.num_actions, self.num_objectives)
@@ -57,7 +58,6 @@ class MO_DQN:
         self.rb_size = replay_buffer_size
         self.batch_ratio = batch_ratio
 
-        self.loss_criterion = loss_criterion
 
         #initialise replay buffer
         self.buffer = ReplayBuffer(self.rb_size, observation_space_shape, self.num_objectives, self.device, self.rng)
@@ -73,9 +73,9 @@ class MO_DQN:
 
     def __create_network(self, num_observations, num_actions, num_objectives) -> Tuple[nn.Module, nn.Module]:
         #create one network for each objective
-        policy_net = DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
-        target_net = DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
-        target_net.load_state_dict(policy_net.state_dict())
+        policy_net = Separated_DQN(num_observations, num_actions, num_objectives, self.loss_criterion, self.device)
+        target_net = Separated_DQN(num_observations, num_actions, num_objectives, self.loss_criterion, self.device)
+        target_net.copy_network_params(policy_net.networks)
 
         return policy_net, target_net
 
@@ -92,7 +92,6 @@ class MO_DQN:
         self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
         self.gamma = gamma
         self.epsilon = epsilon_start
-        self.optimiser = torch.optim.AdamW(self.policy_net.parameters(), lr=1e-4, amsgrad=True)
 
         self.loss_func = self.loss_criterion()
         accumulated_rewards = np.zeros(self.num_objectives)
@@ -139,8 +138,10 @@ class MO_DQN:
                 self.objective_weights = random_objective_weights(self.num_objectives, self.rng, self.device)
 
         return self.reward_logger.to_dataframe()
-
+    
+    
     def __update_weights(self, current_optimisation_iteration, inv_target_update_frequency):
+        '''Update weights of networks build with the Separated_DQN class'''
         #update normal network each time the function is called
         #update target network every k steps
 
@@ -155,27 +156,20 @@ class MO_DQN:
         #fetch Q values of the current observation and action from all the objectives Q-networks
         #if (observations.shape[0] > 1):
         #    print(observations.shape)
-        state_action_values = self.policy_net(observations)
-        state_action_values = state_action_values.gather(2, actions)
-        state_action_values = state_action_values.reshape(observations.shape[0],self.num_objectives)
+
+        for i in range(self.num_objectives):
+            state_action_values = self.policy_net.get_policy_evaluation(observations, actions[:,0,:], i)
+            state_action_values = state_action_values.flatten()
+            next_state_values = self.target_net.get_next_state_values(next_obs, i)
+            next_state_values[term_flags] = 0
         
-        with torch.no_grad():
-            next_state_values = self.target_net(next_obs).max(2).values
-        next_state_values[term_flags] = 0
-            
-        exp_state_action_values = next_state_values * self.gamma + rewards
-        #compute loss between estimates and actual values
-        loss = self.loss_func(state_action_values, exp_state_action_values)
-        #backpropagate loss
-        self.optimiser.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
-        self.optimiser.step()
+            exp_state_action_values = next_state_values * self.gamma + rewards[:,i]
+            #compute loss between estimates and actual values
+            self.policy_net.update_policy_weights(state_action_values, exp_state_action_values, i)
 
         #update the target networks
         if (current_optimisation_iteration % inv_target_update_frequency) == 0:
-                self.target_net.load_state_dict(self.policy_net.state_dict())
-    
+                self.target_net.copy_network_params(self.policy_net.networks)
 
     def act(self, obs, eps_greedy: bool = False):
         #TODO: during execution: only select based on available actions instead of all actions when eps_greedy is false
@@ -186,11 +180,10 @@ class MO_DQN:
 
         #select best action according to policy
         if not eps_greedy or r > self.epsilon:
-            with torch.no_grad():
-                self.policy_net.eval()
-                q_values = self.policy_net(obs)
-                scalarised_values = self.scalarisation_method.scalarise_actions(q_values, self.objective_weights)
-                action = torch.argmax(scalarised_values).item()
+            
+            q_values = self.policy_net.act(obs)
+            scalarised_values = self.scalarisation_method.scalarise_actions(q_values, self.objective_weights)
+            action = torch.argmax(scalarised_values).item()
 
         else: # choose random action
             action = self.rng.choice(self.num_actions)
