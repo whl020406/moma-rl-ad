@@ -190,7 +190,7 @@ class MO_DQN_SEP:
 
         return action
     
-    def evaluate(self, num_repetitions: int = 5, num_points: int = 66, hv_reference_point: np.ndarray = None, seed: int = None, episode_recording_interval: int = None):
+    def evaluate(self, num_repetitions: int = 5, num_points: int = 66, hv_reference_point: np.ndarray = None, seed: int = None, episode_recording_interval: int = None, render_episodes: bool = False):
         """ Evaluates the performance of the trained network by conducting num_repetitions episodes for each objective weights tuple. 
             the parameter num_points determines how many points in the objective-weight space are being explored. These weights
             are spaced equally according to the pymoo implementation: https://pymoo.org/misc/reference_directions.html.
@@ -225,7 +225,8 @@ class MO_DQN_SEP:
                 accumulated_reward = np.zeros(self.num_objectives)
                 curr_num_iterations = 0
                 while not (self.terminated or self.truncated):
-                    self.eval_env.render()#test
+                    if render_episodes:
+                        self.eval_env.render()
 
                     #select action based on obs. Execute action, add up reward, next iteration
                     self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent

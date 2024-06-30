@@ -145,8 +145,8 @@ class ChebyshevScalarisation:
         self.threshold = threshold_value
 
     def scalarise_actions(self, action_q_estimates: torch.Tensor, objective_weights: torch.Tensor) -> torch.Tensor:
-        action_q_estimates = torch.swapaxes(action_q_estimates,1,2) #swap axes so that rows represent q estimates of one action for all objectives
-        action_q_estimates = action_q_estimates.flatten(start_dim=0, end_dim=1)
+        action_q_estimates = torch.swapaxes(action_q_estimates,0,1) #swap axes so that rows represent q estimates of one action for all objectives
+        #action_q_estimates = action_q_estimates.flatten(start_dim=0, end_dim=1)
         self.update_utopian(action_q_estimates)
         z_final = (self.z_star + self.threshold)#.reshape(-1,1)
         diffs = action_q_estimates - z_final
@@ -163,7 +163,7 @@ class LinearScalarisation:
 
     def scalarise_actions(self, action_q_estimates, objective_weights):
         utility_values = action_q_estimates * objective_weights.reshape(-1,1)
-        utility_values = torch.sum(utility_values, dim=1)
+        utility_values = torch.sum(utility_values, dim=0)
         
         return utility_values
 
