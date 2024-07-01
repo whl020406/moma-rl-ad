@@ -35,7 +35,7 @@ class MOMA_DQN:
 
         self.env = env
         self.env.reset() #make sure reset function has been called at least once so that the observation space type is not reset
-        self.env.unwrapped.observation_type = AugmentedMultiAgentObservation(env = env, **env.unwrapped.config["observation"])
+        self.env.unwrapped.observation_type = observation_space_type(env = env, **env.unwrapped.config["observation"])
         self.env.unwrapped.observation_space = env.observation_type.space()
             
         self.rng = np.random.default_rng(seed)
@@ -75,15 +75,15 @@ class MOMA_DQN:
 
 
     def __create_network(self, num_observations, num_actions, num_objectives) -> Tuple[nn.Module, nn.Module]:
-        #create one network for each objective
-        policy_net = DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
-        target_net = DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
-        target_net.load_state_dict(policy_net.state_dict())
+            #create one network for each objective
+            policy_net = DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
+            target_net = DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
+            target_net.load_state_dict(policy_net.state_dict())
 
-        return policy_net, target_net
+            return policy_net, target_net
 
-    def train(self, num_iterations: int = 1000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 5, 
-              gamma: float = 1, epsilon_start: float = 0.05, epsilon_end: float = 0) :
+    def train(self, num_iterations: int = 1000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 20, 
+                gamma: float = 0.9, epsilon_start: float = 0.05, epsilon_end: float = 0) :
         '''
         Runs the training procedure for num_iterations iterations. The inv_optimisation_frequency specifies 
         the number of iterations after which a weight update occurs.The inv_target_update_frequency specifies 
@@ -95,7 +95,8 @@ class MOMA_DQN:
         self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
         self.gamma = gamma
         self.epsilon = epsilon_start
-        self.optimiser = torch.optim.AdamW(self.policy_net.parameters())
+        self.optimiser = torch.optim.AdamW(self.policy_net.parameters(), lr=1e-4, amsgrad=True)
+
         self.loss_func = self.loss_criterion()
         accumulated_rewards = np.zeros(self.num_objectives)
         episode_nr = 0
@@ -126,13 +127,15 @@ class MOMA_DQN:
             self.obs = self.next_obs #use next_obs as obs during the next iteration
             #update the weights every optimisation_frequency steps
             if (i % inv_optimisation_frequency) == 0:
-                self.__update_weights(num_of_conducted_optimisation_steps, inv_target_update_frequency)
+                #Test TODO: remove this line. It is use for testing whether it is better to only start optimising once the buffer is full
+                if self.buffer.num_elements == self.rb_size:
+                    self.__update_weights(num_of_conducted_optimisation_steps, inv_target_update_frequency)
                 num_of_conducted_optimisation_steps += 1
 
             if self.terminated or self.truncated:
                 self.reward_logger.add(episode_nr, *list(accumulated_rewards))
 
-                accumulated_rewards = 0
+                accumulated_rewards = np.zeros(self.num_objectives)
                 episode_nr += 1
                 self.obs, _ = self.env.reset()
                 self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
@@ -143,8 +146,7 @@ class MOMA_DQN:
     def __update_weights(self, current_optimisation_iteration, inv_target_update_frequency):
         #update normal network each time the function is called
         #update target network every k steps
-        self.policy_net.train()
-        self.target_net.eval()
+
         #fetch samples from replay buffer
         batch_samples = self.buffer.sample(round(self.buffer.num_elements*self.batch_ratio))
         observations = self.buffer.get_observations(batch_samples)
@@ -159,21 +161,24 @@ class MOMA_DQN:
         state_action_values = self.policy_net(observations)
         state_action_values = state_action_values.gather(2, actions)
         state_action_values = state_action_values.reshape(observations.shape[0],self.num_objectives)
-        next_state_values = self.target_net(next_obs).max(2).values
+        
+        with torch.no_grad():
+            next_state_values = self.target_net(next_obs).max(2).values
         next_state_values[term_flags] = 0
             
         exp_state_action_values = next_state_values * self.gamma + rewards
         #compute loss between estimates and actual values
         loss = self.loss_func(state_action_values, exp_state_action_values)
-
         #backpropagate loss
         self.optimiser.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
         self.optimiser.step()
 
         #update the target networks
         if (current_optimisation_iteration % inv_target_update_frequency) == 0:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
+
 
     def act(self, obs, eps_greedy: bool = False):
         #TODO: during execution: only select based on available actions instead of all actions when eps_greedy is false
@@ -187,6 +192,7 @@ class MOMA_DQN:
             with torch.no_grad():
                 self.policy_net.eval()
                 q_values = self.policy_net(obs)
+                q_values = q_values.reshape(self.num_objectives, self.num_actions)
                 scalarised_values = self.scalarisation_method.scalarise_actions(q_values, self.objective_weights)
                 action = torch.argmax(scalarised_values).item()
 
@@ -194,8 +200,8 @@ class MOMA_DQN:
             action = self.rng.choice(self.num_actions)
 
         return action
-    
-    def evaluate(self, num_repetitions: int = 5, num_points: int = 66, hv_reference_point: np.ndarray = None, seed: int = None, episode_recording_interval: int = None):
+
+    def evaluate(self, num_repetitions: int = 5, num_points: int = 66, hv_reference_point: np.ndarray = None, seed: int = None, episode_recording_interval: int = None, render_episodes: bool = False):
         """ Evaluates the performance of the trained network by conducting num_repetitions episodes for each objective weights tuple. 
             the parameter num_points determines how many points in the objective-weight space are being explored. These weights
             are spaced equally according to the pymoo implementation: https://pymoo.org/misc/reference_directions.html.
@@ -230,6 +236,9 @@ class MOMA_DQN:
                 accumulated_reward = np.zeros(self.num_objectives)
                 curr_num_iterations = 0
                 while not (self.terminated or self.truncated):
+                    if render_episodes:
+                        self.eval_env.render()
+
                     #select action based on obs. Execute action, add up reward, next iteration
                     self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
                     self.action = self.act(self.obs)

@@ -1,3 +1,4 @@
+import highway_env.utils
 import torch
 import numpy as np
 from collections import namedtuple
@@ -7,6 +8,8 @@ import pandas as pd
 from highway_env.envs.common.observation import KinematicObservation, ObservationType
 from gymnasium import spaces
 from typing import List, Dict, TYPE_CHECKING, Optional, Union, Tuple
+import highway_env
+from highway_env.road.lane import AbstractLane
 
 if TYPE_CHECKING:
     from highway_env.envs.common.abstract import AbstractEnv
@@ -82,7 +85,8 @@ class AugmentedKinematicObservation(KinematicObservation):
         self.observe_intentions = observe_intentions
 
     def space(self) -> spaces.Space:
-        return spaces.Box(shape=(self.vehicles_count, len(self.features)+self.num_objectives), low=-np.inf, high=np.inf, dtype=np.float32)
+        # 
+        return spaces.Box(shape=(self.vehicles_count, len(self.features)+1+self.num_objectives), low=-np.inf, high=np.inf, dtype=np.float32)
 
     def observe(self) -> np.ndarray:
         if not self.env.road:
@@ -91,10 +95,11 @@ class AugmentedKinematicObservation(KinematicObservation):
         # Add ego-vehicle
         df = pd.DataFrame.from_records([self.observer_vehicle.to_dict()])[self.features] #add standard features
 
-        #add objective weights features
-        obj_dict = {f"objective_weights_{n}": float(w) for n, w in enumerate(self.observer_vehicle.objective_weights)}
-        obj_df = pd.DataFrame.from_records([obj_dict])
-        df = pd.concat([df,obj_df], axis=1)
+        #add objective weights features and is_controlled flag to ego vehicle observation
+        augment_dict = {"is_controlled": self.observer_vehicle.is_controlled}
+        augment_dict.update({f"objective_weights_{n}": np.nan for n, w in enumerate(self.observer_vehicle.objective_weights)})
+        augment_df = pd.DataFrame.from_records([augment_dict])
+        df = pd.concat([df,augment_df], axis=1)
         
         # Add nearby traffic
         close_vehicles = self.env.road.close_vehicles_to(self.observer_vehicle,
@@ -108,29 +113,66 @@ class AugmentedKinematicObservation(KinematicObservation):
                 [v.to_dict(origin, observe_intentions=self.observe_intentions)
                  for v in close_vehicles[-self.vehicles_count + 1:]])[self.features]
             
-            #add objective weights features
-            obj_dict_list = [{f"objective_weights_{n}": float(w) for n, w in enumerate(v.objective_weights)} 
-                             for v in close_vehicles[-self.vehicles_count + 1:]]
-            others_obj_weights_df = pd.DataFrame.from_records(obj_dict_list)
+            #add additional features (objective weights and is_controlled flag for all of the close vehicles)
+            augment_dict_list = [dict(
+                                {"is_controlled": v.is_controlled},
+                                **{f"objective_weights_{n}": float(w) for n, w in enumerate(v.objective_weights)}
+                                )
+                            for v in close_vehicles[-self.vehicles_count + 1:]]
+            
+            others_augment_df = pd.DataFrame.from_records(augment_dict_list)
 
-            others_df = pd.concat([others_standard_df, others_obj_weights_df], axis = 1)
+            #append observations of nearby vehicles to dataframe of ego vehicle observations
+            others_df = pd.concat([others_standard_df, others_augment_df], axis = 1)
             df = pd.concat([df,others_df], axis=0, ignore_index=True)
+        
         # Normalize and clip
         if self.normalize:
-            df = self.normalize_obs(df)
+            MAX_SPEED = self.observer_vehicle.MAX_SPEED
+            MIN_SPEED = self.observer_vehicle.MIN_SPEED
+            df = self.normalize_obs(df, MAX_SPEED, MIN_SPEED)
         # Fill missing rows
         if df.shape[0] < self.vehicles_count:
-            rows = np.zeros((self.vehicles_count - df.shape[0], len(self.features)))
-            df = pd.concat([df, pd.DataFrame(data=rows, columns=self.features)], ignore_index=True)
+            rows = np.zeros((self.vehicles_count - df.shape[0], len(self.features)+1+self.num_objectives))
+            df = pd.concat([df, pd.DataFrame(data=rows, columns=df.columns)], ignore_index=True)
         # Reorder
         obs = df.values.copy()
         if self.order == "shuffled":
             self.env.np_random.shuffle(obs[1:])
         # Flatten
+        obs = obs.astype(self.space().dtype)
         return obs.astype(self.space().dtype)
+    
+    def normalize_obs(self, df: pd.DataFrame,MAX_SPEED, MIN_SPEED) -> pd.DataFrame:
+        """
+        Normalize the observation values.
 
-
-
+        For now, assume that the road is straight along the x axis.
+        :param Dataframe df: observation data
+        """
+        if not self.features_range:
+            side_lanes = self.env.road.network.all_side_lanes(self.observer_vehicle.lane_index)
+            self.features_range = {
+                "x": [-5.0 * MAX_SPEED, 5.0 * MAX_SPEED],
+                "y": [- AbstractLane.DEFAULT_WIDTH* len(side_lanes), AbstractLane.DEFAULT_WIDTH * len(side_lanes)],
+                "vx": [MIN_SPEED - MAX_SPEED, MAX_SPEED - MIN_SPEED],
+                "vy": [-MAX_SPEED, MAX_SPEED]
+            }
+        vx_range_ego = [MIN_SPEED, MAX_SPEED]
+        for feature, f_range in self.features_range.items():
+            if feature in df:
+                    #if feature is velocity in x direction
+                    if feature == "vx":
+                        #do different normalisation for ego vehicle
+                        df.loc[0,feature] = highway_env.utils.lmap(df.loc[0,feature],vx_range_ego, [0, 1])
+                        #and the standard normalisation for other vehicles
+                        df.loc[1:,feature] = highway_env.utils.lmap(df[feature], [f_range[0], f_range[1]], [-1, 1])
+                    else:
+                        df[feature] = highway_env.utils.lmap(df[feature], [f_range[0], f_range[1]], [-1, 1])
+            if self.clip:
+                df[feature] = np.clip(df[feature], -1, 1)
+        return df
+    
 class ChebyshevScalarisation:
     """ This class computes the chebyshev scalarisation for a vectorial Q-value and corresponding utopian point z*
         as described in Scalarized Multi-Objective Reinforcement Learning: Novel Design Techniques
@@ -170,32 +212,53 @@ class LinearScalarisation:
 
 class ReplayBuffer:
         
-    def __init__(self, buffer_size, observation_space_shape, num_objectives, device, rng: np.random.Generator):
+    def __init__(self, buffer_size, observation_space_shape, num_objectives, device, rng: np.random.Generator, importance_sampling: bool = False):
         self.size = buffer_size
         self.num_objectives = num_objectives
         self.observation_space_size = np.cumprod(observation_space_shape)[-1]
         self.device = device
         self.rng = rng
+        self.importance_sampling = importance_sampling
 
         #initialise replay buffer
-        self.buffer = torch.zeros(size=(self.size, self.observation_space_size*2+self.num_objectives+2),
-                                        device=self.device) # +2 for selected action and termination flag
+        self.buffer = torch.zeros(size=(self.size, self.observation_space_size*2+self.num_objectives+3),
+                                        device=self.device) # +3 for selected action, termination flag and importance sampling id
         
         self.running_index = 0 #keeps track of next index of the replay buffer to be filled
         self.num_elements = 0 #keeps track of the current number of elements in the replay buffer
-    
-    def push(self, obs, action, next_obs, reward, terminated):
-        elem = torch.concatenate([obs.flatten(), action, next_obs.flatten(), reward, terminated])
+
+    def push(self, obs, action, next_obs, reward, terminated, importance_sampling_id = torch.tensor([0])):
+        assert (not self.importance_sampling) or importance_sampling_id != None, "If importance sampling is activated, you need to provide a corresponding identifier"
+        
+        elem = torch.concatenate([obs.flatten(), action, next_obs.flatten(), reward, terminated, importance_sampling_id])
+        
         self.buffer[self.running_index] = elem
+
         #update auxiliary variables
         self.running_index = (self.running_index + 1) % self.size
         if self.num_elements < self.size:
             self.num_elements += 1
 
     def sample(self, sample_size):
-        sample_indices = self.rng.choice(self.num_elements, size=max(1,sample_size), replace=True, shuffle=True)
+        sample_probs = None
+        if self.importance_sampling:
+            sample_probs = self.compute_importance_sampling_probs()
+
+        sample_indices = self.rng.choice(self.num_elements, p = sample_probs, size=max(1,sample_size), replace=True, shuffle=True)
         return self.buffer[sample_indices]
     
+    def compute_importance_sampling_probs(self):
+        imp_sampling_ids = self.buffer[:self.num_elements,-1]
+        min_id = torch.min(imp_sampling_ids)
+
+        #the more recent the sample, the higher the probability of being selected
+        probs = (imp_sampling_ids - min_id + 1)
+
+        #normalise so that the sum of probs is 1
+        probs = probs / torch.cumsum(probs, dim=0)[-1]
+        
+        probs = probs.cpu().numpy()
+        return probs
 
     #only to be used when the samples originating from this buffer
     def get_observations(self, samples):
@@ -210,10 +273,13 @@ class ReplayBuffer:
         return samples[:,self.observation_space_size+1:self.observation_space_size*2+1]
 
     def get_rewards(self, samples):
-        return samples[:,self.observation_space_size*2+1:-1]
+        return samples[:,self.observation_space_size*2+1:-2]
     
     def get_termination_flag(self, samples):
-        return samples[:,-1].flatten().to(torch.bool)
+        return samples[:,-2].flatten().to(torch.bool)
+    
+    def get_importance_sampling_id(self, samples):
+        return samples[:,-1].flatten()
 
 
 class DataLogger:

@@ -10,11 +10,16 @@ env.unwrapped.configure({
     "screen_width": 500,
     "fps": 20,
     "screen_height": 500,
+    "vehicles_count": 2,
+    "controlled_vehicles": 2,
+    "duration": 80,  # [s]
+
     "observation": {
         "type": "MultiAgentObservation",
         "observation_config": {
             "type": "Kinematics",
-            "see_behind": True
+            "see_behind": True,
+            "normalize": True
         }
     }
 })
@@ -29,7 +34,7 @@ truncated = False
 while True:
     #print(env.get_wrapper_attr('get_available_actions')())
     obs, reward, done, truncated, info = env.step(env.action_space.sample())
-    print(reward)
+    print(obs)
     env.render()
 
 plt.imshow(env.render())

@@ -106,7 +106,7 @@ class MOHighwayEnv(HighwayEnvFast):
                 spacing=self.config["ego_spacing"]
             )
             vehicle = self.action_type.vehicle_class(self.road, vehicle.position, vehicle.heading, vehicle.speed)
-            
+            vehicle.is_controlled = 1
             #set random objective weights for controlled vehicles (2-objectives)
             #can be overriden during training by the MOMA-RL-algorithm
             vehicle.objective_weights = random_objective_weights(num_objectives=2, rng = self.config["rng"], device= self.config["device"])
@@ -123,9 +123,10 @@ class MOHighwayEnv(HighwayEnvFast):
             for _ in range(others):
                 vehicle = other_vehicles_type.create_random(self.road, spacing=1 / self.config["vehicles_density"])
                 vehicle.randomize_behavior()
+                vehicle.is_controlled = 0
 
-                #set weights of 0.5 for each objective for uncontrolled vehicles (2-objectives)
+                #set weights of 0.0 for each objective for uncontrolled vehicles (2-objectives)
                 vehicle.MAX_SPEED = max_speed
                 vehicle.MIN_SPEED = min_speed
-                vehicle.objective_weights = torch.tensor([0.5,0.5], device=self.config["device"])
+                vehicle.objective_weights = torch.tensor([0.0,0.0], device=self.config["device"])
                 self.road.vehicles.append(vehicle)
