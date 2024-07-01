@@ -34,9 +34,7 @@ class MOMA_DQN:
         self.objective_names = objective_names
 
         self.env = env
-        self.env.reset() #make sure reset function has been called at least once so that the observation space type is not reset
-        self.env.unwrapped.observation_type = observation_space_type(env = env, **env.unwrapped.config["observation"])
-        self.env.unwrapped.observation_space = env.observation_type.space()
+        self.observation_space_type = observation_space_type
             
         self.rng = np.random.default_rng(seed)
         torch.manual_seed(seed)
@@ -82,8 +80,8 @@ class MOMA_DQN:
 
             return policy_net, target_net
 
-    def train(self, num_iterations: int = 1000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 20, 
-                gamma: float = 0.9, epsilon_start: float = 0.05, epsilon_end: float = 0) :
+    def train(self, num_episodes: int = 5_000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 10, 
+                gamma: float = 0.9, epsilon_start: float = 0.1, epsilon_end: float = 0) :
         '''
         Runs the training procedure for num_iterations iterations. The inv_optimisation_frequency specifies 
         the number of iterations after which a weight update occurs.The inv_target_update_frequency specifies 
@@ -102,44 +100,45 @@ class MOMA_DQN:
         episode_nr = 0
         num_of_conducted_optimisation_steps = 0
         #take step in environment
-        for i in trange(num_iterations, desc="Training iterations", mininterval=2):
-            self.action = self.act(self.obs, eps_greedy=True)
-            self.reduce_epsilon(num_iterations, epsilon_start, epsilon_end) #linearly reduce the value of epsilon
-            (
-                self.next_obs,
-                self.reward,
-                self.terminated,
-                self.truncated,
-                info,
-            ) = self.env.step(self.action)
-            #accumulate episode reward
-            accumulated_rewards = accumulated_rewards + self.reward
+        for i in trange(num_episodes, desc="Training episodes", mininterval=2):
+            while not (self.terminated or self.truncated):
+                self.action = self.act(self.obs, eps_greedy=True)
+                (
+                    self.next_obs,
+                    self.reward,
+                    self.terminated,
+                    self.truncated,
+                    info,
+                ) = self.env.step(self.action)
+                #accumulate episode reward
+                accumulated_rewards = accumulated_rewards + self.reward
 
-            #cast return values to gpu tensor before storing them in replay buffer
-            self.next_obs = torch.tensor(self.next_obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
-            if self.num_objectives == 1:
-                self.reward = [self.reward]
-            self.reward = torch.tensor(self.reward, device=self.device)
-            self.action = torch.tensor([self.action], device=self.device)
-            self.terminated = torch.tensor([self.terminated], device=self.device)
-            #push to replay buffer
-            self.buffer.push(self.obs, self.action, self.next_obs, self.reward, self.terminated)
-            self.obs = self.next_obs #use next_obs as obs during the next iteration
-            #update the weights every optimisation_frequency steps
-            if (i % inv_optimisation_frequency) == 0:
-                #Test TODO: remove this line. It is use for testing whether it is better to only start optimising once the buffer is full
-                if self.buffer.num_elements == self.rb_size:
-                    self.__update_weights(num_of_conducted_optimisation_steps, inv_target_update_frequency)
-                num_of_conducted_optimisation_steps += 1
+                #cast return values to gpu tensor before storing them in replay buffer
+                self.next_obs = torch.tensor(self.next_obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
+                if self.num_objectives == 1:
+                    self.reward = [self.reward]
+                self.reward = torch.tensor(self.reward, device=self.device)
+                self.action = torch.tensor([self.action], device=self.device)
+                self.terminated = torch.tensor([self.terminated], device=self.device)
+                #push to replay buffer
+                self.buffer.push(self.obs, self.action, self.next_obs, self.reward, self.terminated)
+                self.obs = self.next_obs #use next_obs as obs during the next iteration
+                #update the weights every optimisation_frequency steps
+                if (i % inv_optimisation_frequency) == 0:
+                    #Test TODO: remove this line. It is use for testing whether it is better to only start optimising once the buffer is full
+                    if self.buffer.num_elements == self.rb_size:
+                        self.__update_weights(num_of_conducted_optimisation_steps, inv_target_update_frequency)
+                    num_of_conducted_optimisation_steps += 1
 
-            if self.terminated or self.truncated:
-                self.reward_logger.add(episode_nr, *list(accumulated_rewards))
+                if self.terminated or self.truncated:
+                    self.reduce_epsilon(num_episodes, epsilon_start, epsilon_end) #linearly reduce the value of epsilon
+                    self.reward_logger.add(episode_nr, *list(accumulated_rewards))
 
-                accumulated_rewards = np.zeros(self.num_objectives)
-                episode_nr += 1
-                self.obs, _ = self.env.reset()
-                self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
-                self.objective_weights = random_objective_weights(self.num_objectives, self.rng, self.device)
+                    accumulated_rewards = np.zeros(self.num_objectives)
+                    episode_nr += 1
+                    self.obs, _ = self.env.reset()
+                    self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
+                    self.objective_weights = random_objective_weights(self.num_objectives, self.rng, self.device)
 
         return self.reward_logger.to_dataframe()
 

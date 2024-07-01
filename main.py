@@ -21,6 +21,12 @@ env.unwrapped.configure({
             "see_behind": True,
             "normalize": True
         }
+    },
+    "action": {
+        "type": "MultiAgentAction",
+        "action_config": {
+            "type": "DiscreteMetaAction",
+        }
     }
 })
 env.unwrapped.configure({
@@ -33,7 +39,8 @@ done = False
 truncated = False
 while True:
     #print(env.get_wrapper_attr('get_available_actions')())
-    obs, reward, done, truncated, info = env.step(env.action_space.sample())
+    action = env.action_space.sample()
+    obs, reward, done, truncated, info = env.step(action)
     print(obs)
     env.render()
 
