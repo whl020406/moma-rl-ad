@@ -80,7 +80,7 @@ class MOMA_DQN:
 
             return policy_net, target_net
 
-    def train(self, num_episodes: int = 5_000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 10, 
+    def train(self, num_episodes: int = 5_000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 5, 
                 gamma: float = 0.9, epsilon_start: float = 0.1, epsilon_end: float = 0) :
         '''
         Runs the training procedure for num_iterations iterations. The inv_optimisation_frequency specifies 
@@ -90,7 +90,8 @@ class MOMA_DQN:
         Its value is linearly reduced during the training procedure from epsilon_start to epsilon_end.
         '''
         self.obs, _ = self.env.reset()
-        self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
+        self.obs = [torch.tensor(single_obs, device=self.device) for single_obs in self.obs] #reshape observations and
+        self.obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.obs] #remove nan values
         self.gamma = gamma
         self.epsilon = epsilon_start
         self.optimiser = torch.optim.AdamW(self.policy_net.parameters(), lr=1e-4, amsgrad=True)
@@ -100,45 +101,47 @@ class MOMA_DQN:
         episode_nr = 0
         num_of_conducted_optimisation_steps = 0
         #take step in environment
-        for i in trange(num_episodes, desc="Training episodes", mininterval=2):
+        for episode_nr in trange(num_episodes, desc="Training episodes", mininterval=2):
+            self.terminated = False
+            self.truncated = False
             while not (self.terminated or self.truncated):
-                self.action = self.act(self.obs, eps_greedy=True)
+                self.actions = self.act(self.obs, eps_greedy=True)
                 (
                     self.next_obs,
-                    self.reward,
+                    self.rewards,
                     self.terminated,
                     self.truncated,
                     info,
-                ) = self.env.step(self.action)
+                ) = self.env.step(self.actions)
+                self.crashed = info["crashed"]
                 #accumulate episode reward
-                accumulated_rewards = accumulated_rewards + self.reward
+                
+                #TODO: figure out what data to log
 
-                #cast return values to gpu tensor before storing them in replay buffer
-                self.next_obs = torch.tensor(self.next_obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
-                if self.num_objectives == 1:
-                    self.reward = [self.reward]
-                self.reward = torch.tensor(self.reward, device=self.device)
-                self.action = torch.tensor([self.action], device=self.device)
-                self.terminated = torch.tensor([self.terminated], device=self.device)
-                #push to replay buffer
-                self.buffer.push(self.obs, self.action, self.next_obs, self.reward, self.terminated)
-                self.obs = self.next_obs #use next_obs as obs during the next iteration
-                #update the weights every optimisation_frequency steps
-                if (i % inv_optimisation_frequency) == 0:
-                    #Test TODO: remove this line. It is use for testing whether it is better to only start optimising once the buffer is full
-                    if self.buffer.num_elements == self.rb_size:
-                        self.__update_weights(num_of_conducted_optimisation_steps, inv_target_update_frequency)
+                self.next_obs = [torch.tensor(single_obs, device=self.device) for single_obs in self.next_obs] #reshape observations and
+                self.next_obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.next_obs] #remove nan values
+
+                self.buffer.push(self.obs, self.actions, self.next_obs, self.rewards, self.crashed)
+                
+                #use next_obs as obs during the next iteration
+                self.obs = self.next_obs
+
+                #update the weights every optimisation_frequency steps and only once the replay buffer is filled
+                if ((episode_nr % inv_optimisation_frequency) == 0) and (self.buffer.num_elements == self.rb_size):
+
+                    self.__update_weights(num_of_conducted_optimisation_steps, inv_target_update_frequency)
                     num_of_conducted_optimisation_steps += 1
 
-                if self.terminated or self.truncated:
-                    self.reduce_epsilon(num_episodes, epsilon_start, epsilon_end) #linearly reduce the value of epsilon
-                    self.reward_logger.add(episode_nr, *list(accumulated_rewards))
+            #reset environment if it was terminated
+            if self.terminated or self.truncated:
+                self.reduce_epsilon(num_episodes, epsilon_start, epsilon_end) #linearly reduce the value of epsilon
+                self.reward_logger.add(episode_nr, *list(accumulated_rewards))
 
-                    accumulated_rewards = np.zeros(self.num_objectives)
-                    episode_nr += 1
-                    self.obs, _ = self.env.reset()
-                    self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
-                    self.objective_weights = random_objective_weights(self.num_objectives, self.rng, self.device)
+                accumulated_rewards = np.zeros(self.num_objectives)
+                self.obs, _ = self.env.reset()
+                self.obs = [torch.tensor(single_obs.reshape(1,-1), device=self.device) for single_obs in self.obs] #reshape observations
+                self.obs = [single_obs[single_obs != np.nan] for single_obs in self.obs] #remove nan values
+                self.objective_weights = random_objective_weights(self.num_objectives, self.rng, self.device)
 
         return self.reward_logger.to_dataframe()
 
@@ -180,25 +183,27 @@ class MOMA_DQN:
 
 
     def act(self, obs, eps_greedy: bool = False):
-        #TODO: during execution: only select based on available actions instead of all actions when eps_greedy is false
-        #choose action based on epsilon greedy policy and policy network
-        #assumption: actions are discrete and labelled from 0 to n-1
-        r = self.rng.random()
-        action = None
+        '''select a list of actions, one element for each autonomously controlled agent'''
+        joint_action = []
+        for single_obs in obs:
+            r = self.rng.random()
+            action = None
 
-        #select best action according to policy
-        if not eps_greedy or r > self.epsilon:
-            with torch.no_grad():
-                self.policy_net.eval()
-                q_values = self.policy_net(obs)
-                q_values = q_values.reshape(self.num_objectives, self.num_actions)
-                scalarised_values = self.scalarisation_method.scalarise_actions(q_values, self.objective_weights)
-                action = torch.argmax(scalarised_values).item()
+            #select best action according to policy
+            if not eps_greedy or r > self.epsilon:
+                with torch.no_grad():
+                    self.policy_net.eval()
+                    q_values = self.policy_net(single_obs)
+                    q_values = q_values.reshape(self.num_objectives, self.num_actions)
+                    scalarised_values = self.scalarisation_method.scalarise_actions(q_values, self.objective_weights)
+                    action = torch.argmax(scalarised_values).item()
 
-        else: # choose random action
-            action = self.rng.choice(self.num_actions)
+            else: # choose random action
+                action = self.rng.choice(self.num_actions)
 
-        return action
+            joint_action.append(action)
+
+        return tuple(joint_action)
 
     def evaluate(self, num_repetitions: int = 5, num_points: int = 66, hv_reference_point: np.ndarray = None, seed: int = None, episode_recording_interval: int = None, render_episodes: bool = False):
         """ Evaluates the performance of the trained network by conducting num_repetitions episodes for each objective weights tuple. 
@@ -239,7 +244,8 @@ class MOMA_DQN:
                         self.eval_env.render()
 
                     #select action based on obs. Execute action, add up reward, next iteration
-                    self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
+                    self.obs = [torch.tensor(single_obs.reshape(1,-1), device=self.device) for single_obs in self.obs] #reshape observations
+                    self.obs = [single_obs[single_obs != np.nan] for single_obs in self.obs] #remove nan values
                     self.action = self.act(self.obs)
                     (
                     self.obs,

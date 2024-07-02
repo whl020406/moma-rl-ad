@@ -8,6 +8,8 @@ import pandas as pd
 from highway_env.envs.common.observation import KinematicObservation, ObservationType
 from gymnasium import spaces
 from typing import List, Dict, TYPE_CHECKING, Optional, Union, Tuple
+from highway_env.vehicle.kinematics import Vehicle
+
 import highway_env
 from highway_env.road.lane import AbstractLane
 
@@ -36,7 +38,16 @@ class AugmentedMultiAgentObservation(ObservationType):
         return spaces.Tuple([obs_type.space() for obs_type in self.agents_observation_types])
 
     def observe(self) -> tuple:
-        return tuple(obs_type.observe() for obs_type in self.agents_observation_types)
+        observations = []
+        vehicle_lists = []
+        for obs_type in self.agents_observation_types:
+            obs, vehicle_list = obs_type.observe()
+            observations.append(obs)
+            vehicle_lists.append(vehicle_list)
+        
+        #to not alter the api, this variable has to be accessed within the reward function to fetch the properties of the other vehicles
+        self.curr_observation_vehicle_lists = vehicle_lists
+        return tuple(observations)
 
 
 class AugmentedKinematicObservation(KinematicObservation):
@@ -88,7 +99,9 @@ class AugmentedKinematicObservation(KinematicObservation):
         # 
         return spaces.Box(shape=(self.vehicles_count, len(self.features)+1+self.num_objectives), low=-np.inf, high=np.inf, dtype=np.float32)
 
-    def observe(self) -> np.ndarray:
+    def observe(self) -> Tuple[np.ndarray, List[Vehicle]]:
+        vehicle_list = []
+        vehicle_list.append(self.observer_vehicle) #add current ego vehicle at first position of vehicle list
         if not self.env.road:
             return np.zeros(self.space().shape)
 
@@ -108,6 +121,7 @@ class AugmentedKinematicObservation(KinematicObservation):
                                                          see_behind=self.see_behind,
                                                          sort=self.order == "sorted")
         if close_vehicles:
+            vehicle_list.extend(close_vehicles) #add close vehicles to vehicle list
             origin = self.observer_vehicle if not self.absolute else None
             others_standard_df = pd.DataFrame.from_records(
                 [v.to_dict(origin, observe_intentions=self.observe_intentions)
@@ -141,7 +155,7 @@ class AugmentedKinematicObservation(KinematicObservation):
             self.env.np_random.shuffle(obs[1:])
         # Flatten
         obs = obs.astype(self.space().dtype)
-        return obs.astype(self.space().dtype)
+        return obs.astype(self.space().dtype), vehicle_list
     
     def normalize_obs(self, df: pd.DataFrame,MAX_SPEED, MIN_SPEED) -> pd.DataFrame:
         """
@@ -227,9 +241,11 @@ class ReplayBuffer:
         self.running_index = 0 #keeps track of next index of the replay buffer to be filled
         self.num_elements = 0 #keeps track of the current number of elements in the replay buffer
 
-    def push(self, obs, action, next_obs, reward, terminated, importance_sampling_id = torch.tensor([0])):
+    def push(self, obs, action, next_obs, reward, terminated, importance_sampling_id = None):
         assert (not self.importance_sampling) or importance_sampling_id != None, "If importance sampling is activated, you need to provide a corresponding identifier"
-        
+        if not self.importance_sampling:
+            importance_sampling_id = torch.tensor([0], device=self.device)
+
         elem = torch.concatenate([obs.flatten(), action, next_obs.flatten(), reward, terminated, importance_sampling_id])
         
         self.buffer[self.running_index] = elem
@@ -244,7 +260,7 @@ class ReplayBuffer:
         if self.importance_sampling:
             sample_probs = self.compute_importance_sampling_probs()
 
-        sample_indices = self.rng.choice(self.num_elements, p = sample_probs, size=max(1,sample_size), replace=True, shuffle=True)
+        sample_indices = self.rng.choice(self.num_elements, p = sample_probs, size=max(1,round(sample_size)), replace=True, shuffle=True)
         return self.buffer[sample_indices]
     
     def compute_importance_sampling_probs(self):

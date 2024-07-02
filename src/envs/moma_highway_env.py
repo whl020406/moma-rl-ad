@@ -54,10 +54,22 @@ class MOMAHighwayEnv(HighwayEnvFast):
         return config
 
     def _reward(self, action: Action) -> float:
+        '''Fetches the reward dictionaries for all ego vehicles and their closest neighbouring cars and uses that 
+           to construct a reward array, containing the two-dimensional rewards for each vehicle. 
+           The first vehicle in the second dimension corresponds to an ego-vehicle'''
         
-        rewards = self._rewards(action)
+        reward_dict_lists = self._rewards(action)
+        reward_array = np.zeros(shape=(len(reward_dict_lists),len(reward_dict_lists[0]),2))#2 because we have two objectives
+
+        for i, dict_list in enumerate(reward_dict_lists):
+            for j, reward_dict in enumerate(dict_list):
+                reward_array[i,j,:] = self._compute_vehicle_reward(reward_dict)
+        return reward_array
+    
+    def _compute_vehicle_reward(self, reward_dict):
+        '''Computes the reward tuple for a single vehicle based on the information in the reward dictionary.'''
         rewards = {
-            name: self.config.get(name, 0) * reward for name, reward in rewards.items()
+            name: self.config.get(name, 0) * reward for name, reward in reward_dict.items()
         }
         speed_reward = rewards["high_speed_reward"] + rewards["right_lane_reward"]
         energy_reward = rewards["energy_consumption_reward"] + rewards["right_lane_reward"]
@@ -78,23 +90,38 @@ class MOMAHighwayEnv(HighwayEnvFast):
         return np.array([speed_reward, energy_reward])
 
     def _rewards(self, action: Action) -> Dict[Text, float]:
+        '''constructs the reward dictionaries for each vehicle using the variable curr_observation_vehicle_lists in
+           AugmentedMultiAgentObservation.'''
+        
+        #fetch vehicles of the current observation from observation type
+        vehicle_lists = self.observation_type.curr_observation_vehicle_lists
         #if its the first time this function is called: initialise energy consumption function
         if not hasattr(self, 'energy_consumption_function'):
             self.energy_consumption_function = self.config["energy_consumption_function"](self.vehicle.target_speeds, self.vehicle.KP_A)
 
-        neighbours = self.road.network.all_side_lanes(self.vehicle.lane_index)
-        lane = self.vehicle.target_lane_index[2] if isinstance(self.vehicle, ControlledVehicle) \
-            else self.vehicle.lane_index[2]
-        # Use forward speed rather than speed, see https://github.com/eleurent/highway-env/issues/268
-        forward_speed = self.vehicle.speed * np.cos(self.vehicle.heading)
-        scaled_speed = utils.lmap(forward_speed, self.config["reward_speed_range"], [0, 1])
-        return {
-            "collision_reward": float(self.vehicle.crashed),
-            "right_lane_reward": lane / max(len(neighbours) - 1, 1),
-            "high_speed_reward": np.clip(scaled_speed, 0, 1),
-            "energy_consumption_reward": self.energy_consumption_function.compute_efficiency(self.vehicle, normalise=self.config["normalize_reward"])
-        }
-    
+        reward_dict_lists = [] #list containing a list of reward dicts for each vehicle
+        for v_list in vehicle_lists:
+            dict_list = [] #list containing the reward dicts for an ego-vehicle and it's close vehicles
+            for vehicle in v_list:
+
+                neighbours = self.road.network.all_side_lanes(vehicle.lane_index)
+                lane = vehicle.target_lane_index[2] if isinstance(vehicle, ControlledVehicle) \
+                    else vehicle.lane_index[2]
+                # Use forward speed rather than speed, see https://github.com/eleurent/highway-env/issues/268
+                forward_speed = vehicle.speed * np.cos(vehicle.heading)
+                scaled_speed = utils.lmap(forward_speed, self.config["reward_speed_range"], [0, 1])
+
+                dict = {
+                    "collision_reward": float(vehicle.crashed),
+                    "right_lane_reward": lane / max(len(neighbours) - 1, 1),
+                    "high_speed_reward": np.clip(scaled_speed, 0, 1),
+                    "energy_consumption_reward": self.energy_consumption_function.compute_efficiency(vehicle, normalise=self.config["normalize_reward"])
+                }
+                dict_list.append(dict)
+            reward_dict_lists.append(dict_list)
+        
+        return reward_dict_lists
+
     def _create_vehicles(self) -> None:
         """Create some new random vehicles of a given type, and add them on the road."""
         other_vehicles_type = utils.class_from_path(self.config["other_vehicles_type"])
@@ -135,6 +162,26 @@ class MOMAHighwayEnv(HighwayEnvFast):
                 vehicle.MIN_SPEED = min_speed
                 vehicle.objective_weights = torch.tensor([0.0,0.0], device=self.config["device"])
                 self.road.vehicles.append(vehicle)
+
+    def _info(self, obs: Observation, action: Optional[Action] = None) -> dict:
+        """
+        Return a dictionary of additional information. "crashed" features information on crashes for all controllable vehicles
+
+        :param obs: current observation
+        :param action: current action
+        :return: info dict
+        """
+        info = {
+            "speed": self.vehicle.speed,
+            "crashed": [v.crashed for v in self.controlled_vehicles],
+            "action": action,
+        }
+        try:
+            info["rewards"] = self._rewards(action)
+        except NotImplementedError:
+            pass
+        return info
+
 
     def define_spaces(self) -> None:
         """
