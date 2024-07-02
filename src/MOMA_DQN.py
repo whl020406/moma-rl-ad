@@ -34,6 +34,7 @@ class MOMA_DQN:
         self.objective_names = objective_names
 
         self.env = env
+        self.num_controlled_vehicles = len(self.env.unwrapped.controlled_vehicles)
         self.observation_space_type = observation_space_type
             
         self.rng = np.random.default_rng(seed)
@@ -51,8 +52,11 @@ class MOMA_DQN:
         self.num_actions = num_actions
         self.observation_space_shape = observation_space_shape
 
+        self.observation_space_length = np.cumprod(observation_space_shape)[-1]
+
+        #minus term because the objective weights of the ego vehicle are excluded
         (self.policy_net, self.target_net) = \
-        self.__create_network(np.cumprod(observation_space_shape)[-1], self.num_actions, self.num_objectives)
+        self.__create_network(self.observation_space_length-self.num_objectives, self.num_actions, self.num_objectives)
 
         self.replay_enabled = replay_enabled
         self.rb_size = replay_buffer_size
@@ -61,7 +65,8 @@ class MOMA_DQN:
         self.loss_criterion = loss_criterion
 
         #initialise replay buffer
-        self.buffer = ReplayBuffer(self.rb_size, observation_space_shape, self.num_objectives, self.device, self.rng)
+        #*2 for num_objectives because we want to store the rewards of the ego vehicle and the mean reward of close vehicles separately
+        self.buffer = ReplayBuffer(self.rb_size, self.observation_space_length-self.num_objectives, self.num_objectives*2, self.device, self.rng, importance_sampling=True)
 
         #initialise reward logger
         feature_names = ["episode"]
@@ -114,14 +119,17 @@ class MOMA_DQN:
                     info,
                 ) = self.env.step(self.actions)
                 self.crashed = info["crashed"]
+                self.vehicle_obj_weights = info["vehicle_objective_weights"]
                 #accumulate episode reward
-                
-                #TODO: figure out what data to log
+
+                #TODO: figure out what data to log: look at corresponding trello entry
 
                 self.next_obs = [torch.tensor(single_obs, device=self.device) for single_obs in self.next_obs] #reshape observations and
                 self.next_obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.next_obs] #remove nan values
+                
+                reward_summary = self.compute_reward_summary(self.rewards, self.vehicle_obj_weights)
 
-                self.buffer.push(self.obs, self.actions, self.next_obs, self.rewards, self.crashed)
+                self.buffer.push(self.obs, self.actions, self.next_obs, reward_summary, self.crashed, episode_nr, num_samples=self.num_controlled_vehicles)
                 
                 #use next_obs as obs during the next iteration
                 self.obs = self.next_obs
@@ -139,13 +147,41 @@ class MOMA_DQN:
 
                 accumulated_rewards = np.zeros(self.num_objectives)
                 self.obs, _ = self.env.reset()
-                self.obs = [torch.tensor(single_obs.reshape(1,-1), device=self.device) for single_obs in self.obs] #reshape observations
-                self.obs = [single_obs[single_obs != np.nan] for single_obs in self.obs] #remove nan values
+                self.obs = [torch.tensor(single_obs, device=self.device) for single_obs in self.obs] #reshape observations and
+                self.obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.obs] #remove nan values
                 self.objective_weights = random_objective_weights(self.num_objectives, self.rng, self.device)
 
         return self.reward_logger.to_dataframe()
 
+    def compute_reward_summary(self, rewards, obj_weights):
+        #TODO: debug shape mismatch
+        reward_summary = []
+
+        for i in range(self.num_controlled_vehicles):
+            r = torch.from_numpy(rewards[i]).to(self.device)
+            weights = torch.stack(obj_weights[i], dim=0).to(self.device)
+            weights[torch.all(weights == 0, dim=1)] = 1 #where vehicles are not controlled --> add raw rewards
+            
+            #this can happen when one of the next vehicle is far away from ego
+            #thus we need to bring it to the same shape
+            if r.shape[0] > weights.shape[0]:
+                assert torch.all(r[weights.shape[0]+1:] == 0) #make sure all rewards beyond this point are 0 anyway
+                r = r[:weights.shape[0]] #remove all excess rows from r
+            
+            weighted_reward = r * weights
+            ego_reward = weighted_reward[0,:]
+            social_reward = weighted_reward[1:,:]
+            mean_social_reward = torch.sum(social_reward,dim=0) / (social_reward.shape[0]) #-1 to exclude the ego vehicle
+            
+            #this means, in replay buffer, the first num_objectives elements in the reward are the ego reward 
+            #and the other two are the mean social reward
+            reward_summary.append(torch.hstack([ego_reward, mean_social_reward]))
+        
+        return reward_summary
+            
+
     def __update_weights(self, current_optimisation_iteration, inv_target_update_frequency):
+        #TODO: adjust to work in MOMA setting
         #update normal network each time the function is called
         #update target network every k steps
 

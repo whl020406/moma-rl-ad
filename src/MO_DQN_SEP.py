@@ -60,7 +60,7 @@ class MO_DQN_SEP:
 
 
         #initialise replay buffer
-        self.buffer = ReplayBuffer(self.rb_size, observation_space_shape, self.num_objectives, self.device, self.rng)
+        self.buffer = ReplayBuffer(self.rb_size, np.cumprod(observation_space_shape)[-1], self.num_objectives, self.device, self.rng)
 
         #initialise reward logger
         feature_names = ["episode"]

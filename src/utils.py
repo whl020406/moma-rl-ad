@@ -229,7 +229,7 @@ class ReplayBuffer:
     def __init__(self, buffer_size, observation_space_shape, num_objectives, device, rng: np.random.Generator, importance_sampling: bool = False):
         self.size = buffer_size
         self.num_objectives = num_objectives
-        self.observation_space_size = np.cumprod(observation_space_shape)[-1]
+        self.observation_space_size = observation_space_shape
         self.device = device
         self.rng = rng
         self.importance_sampling = importance_sampling
@@ -241,15 +241,27 @@ class ReplayBuffer:
         self.running_index = 0 #keeps track of next index of the replay buffer to be filled
         self.num_elements = 0 #keeps track of the current number of elements in the replay buffer
 
-    def push(self, obs, action, next_obs, reward, terminated, importance_sampling_id = None):
+    def push(self, obs, action, next_obs, reward, terminated, importance_sampling_id = None, num_samples: int = 1):
+        assert num_samples >= 1
         assert (not self.importance_sampling) or importance_sampling_id != None, "If importance sampling is activated, you need to provide a corresponding identifier"
         if not self.importance_sampling:
             importance_sampling_id = torch.tensor([0], device=self.device)
 
-        elem = torch.concatenate([obs.flatten(), action, next_obs.flatten(), reward, terminated, importance_sampling_id])
-        
-        self.buffer[self.running_index] = elem
+        #for single agent environments
+        if num_samples == 1:
+            elem = torch.concatenate([obs.flatten(), action, next_obs.flatten(), reward, terminated, importance_sampling_id])
+            self.buffer[self.running_index] = elem
+            self.__increment_indices()
 
+        else:#for multi-agent environments. All samples must have the same importance_sampling_id
+            for i in range(num_samples):
+                elem = torch.concatenate([obs[i].flatten(), torch.tensor([action[i]], device=self.device), next_obs[i].flatten(), reward[i], 
+                                          torch.tensor([terminated[i]], device=self.device), 
+                                          torch.tensor([importance_sampling_id], device=self.device)])
+                self.buffer[self.running_index] = elem
+                self.__increment_indices()
+
+    def __increment_indices(self):
         #update auxiliary variables
         self.running_index = (self.running_index + 1) % self.size
         if self.num_elements < self.size:

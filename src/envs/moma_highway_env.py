@@ -174,14 +174,11 @@ class MOMAHighwayEnv(HighwayEnvFast):
         info = {
             "speed": self.vehicle.speed,
             "crashed": [v.crashed for v in self.controlled_vehicles],
+            "vehicle_objective_weights" : [[v.objective_weights for v in close_vehicles] 
+                                           for close_vehicles in self.observation_type.curr_observation_vehicle_lists],
             "action": action,
         }
-        try:
-            info["rewards"] = self._rewards(action)
-        except NotImplementedError:
-            pass
         return info
-
 
     def define_spaces(self) -> None:
         """
