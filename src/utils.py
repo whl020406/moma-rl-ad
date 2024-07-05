@@ -226,13 +226,14 @@ class LinearScalarisation:
 
 class ReplayBuffer:
         
-    def __init__(self, buffer_size, observation_space_shape, num_objectives, device, rng: np.random.Generator, importance_sampling: bool = False):
+    def __init__(self, buffer_size, observation_space_shape, num_objectives, device, rng: np.random.Generator, importance_sampling: bool = False, prioritise_crashes: bool = False):
         self.size = buffer_size
         self.num_objectives = num_objectives
         self.observation_space_size = observation_space_shape
         self.device = device
         self.rng = rng
         self.importance_sampling = importance_sampling
+        self.prioritise_crashes = prioritise_crashes
 
         #initialise replay buffer
         self.buffer = torch.zeros(size=(self.size, self.observation_space_size*2+self.num_objectives+3),
@@ -268,9 +269,18 @@ class ReplayBuffer:
             self.num_elements += 1
 
     def sample(self, sample_size):
-        sample_probs = None
+        sample_probs = (torch.ones(self.num_elements)/self.num_elements).to(self.device)
         if self.importance_sampling:
             sample_probs = self.compute_importance_sampling_probs()
+
+        if self.prioritise_crashes:
+            crashed_flag = self.buffer[:self.num_elements,-2].to(dtype=torch.bool)
+            inv_crash_ratio = self.num_elements/torch.sum(crashed_flag)
+            sample_probs[crashed_flag] = sample_probs[crashed_flag] * inv_crash_ratio
+
+        #normalise so that the sum of probs is 1
+        sample_probs = sample_probs / torch.cumsum(sample_probs, dim=0)[-1]
+        sample_probs = sample_probs.cpu().numpy() # move to cpu so that it can be used by numpy
 
         sample_indices = self.rng.choice(self.num_elements, p = sample_probs, size=max(1,round(sample_size)), replace=True, shuffle=True)
         return self.buffer[sample_indices]
@@ -281,11 +291,7 @@ class ReplayBuffer:
 
         #the more recent the sample, the higher the probability of being selected
         probs = (imp_sampling_ids - min_id + 1)
-
-        #normalise so that the sum of probs is 1
-        probs = probs / torch.cumsum(probs, dim=0)[-1]
         
-        probs = probs.cpu().numpy()
         return probs
 
     #only to be used when the samples originating from this buffer

@@ -60,7 +60,7 @@ class MO_DQN:
         self.loss_criterion = loss_criterion
 
         #initialise replay buffer
-        self.buffer = ReplayBuffer(self.rb_size, np.cumprod(observation_space_shape)[-1], self.num_objectives, self.device, self.rng)
+        self.buffer = ReplayBuffer(self.rb_size, np.cumprod(observation_space_shape)[-1], self.num_objectives, self.device, self.rng, prioritise_crashes=True)
 
         #initialise reward logger
         feature_names = ["episode"]
@@ -127,7 +127,7 @@ class MO_DQN:
                 #Test TODO: remove this line. It is use for testing whether it is better to only start optimising once the buffer is full
                 if self.buffer.num_elements == self.rb_size:
                     self.__update_weights(num_of_conducted_optimisation_steps, inv_target_update_frequency)
-                num_of_conducted_optimisation_steps += 1
+                    num_of_conducted_optimisation_steps += 1
 
             if self.terminated or self.truncated:
                 self.reward_logger.add(episode_nr, *list(accumulated_rewards))

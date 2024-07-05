@@ -74,8 +74,8 @@ class MOMAHighwayEnv(HighwayEnvFast):
         speed_reward = rewards["high_speed_reward"] + rewards["right_lane_reward"]
         energy_reward = rewards["energy_consumption_reward"] + rewards["right_lane_reward"]
         if rewards["collision_reward"] != 0:
-            speed_reward = 0
-            energy_reward = 0
+            speed_reward = 0 
+            energy_reward = 0 
             return np.array([speed_reward, energy_reward])
         
         if self.config["normalize_reward"]:
