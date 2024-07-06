@@ -275,8 +275,8 @@ class ReplayBuffer:
 
         if self.prioritise_crashes:
             crashed_flag = self.buffer[:self.num_elements,-2].to(dtype=torch.bool)
-            inv_crash_ratio = self.num_elements/torch.sum(crashed_flag)
-            sample_probs[crashed_flag] = sample_probs[crashed_flag] * inv_crash_ratio
+            #inv_crash_ratio = self.num_elements/torch.sum(crashed_flag)
+            sample_probs[crashed_flag] = sample_probs[crashed_flag] * 2
 
         #normalise so that the sum of probs is 1
         sample_probs = sample_probs / torch.cumsum(sample_probs, dim=0)[-1]

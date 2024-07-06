@@ -60,7 +60,7 @@ class MO_DQN:
         self.loss_criterion = loss_criterion
 
         #initialise replay buffer
-        self.buffer = ReplayBuffer(self.rb_size, np.cumprod(observation_space_shape)[-1], self.num_objectives, self.device, self.rng, prioritise_crashes=True)
+        self.buffer = ReplayBuffer(self.rb_size, np.cumprod(observation_space_shape)[-1], self.num_objectives, self.device, self.rng, prioritise_crashes=False)
 
         #initialise reward logger
         feature_names = ["episode"]
@@ -92,7 +92,7 @@ class MO_DQN:
         self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
         self.gamma = gamma
         self.epsilon = epsilon_start
-        self.optimiser = torch.optim.AdamW(self.policy_net.parameters(), lr=1e-4, amsgrad=True)
+        self.optimiser = torch.optim.AdamW(self.policy_net.parameters(), lr=1e-3, amsgrad=True)
 
         self.loss_func = self.loss_criterion()
         accumulated_rewards = np.zeros(self.num_objectives)

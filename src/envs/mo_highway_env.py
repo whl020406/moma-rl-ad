@@ -33,7 +33,7 @@ class MOHighwayEnv(HighwayEnvFast):
             "ego_spacing": 2,
             "vehicles_density": 1,
             "collision_reward": -1,    # The reward received when colliding with a vehicle.
-            "right_lane_reward": 0.05,  # The reward received when driving on the right-most lanes, linearly mapped to
+            "right_lane_reward": 0.2,  # The reward received when driving on the right-most lanes, linearly mapped to
                                        # zero for other lanes.
             "high_speed_reward": 1,  # The reward received when driving at full speed, linearly mapped to zero for
                                        # lower speeds according to config["reward_speed_range"].
@@ -54,22 +54,22 @@ class MOHighwayEnv(HighwayEnvFast):
         rewards = {
             name: self.config.get(name, 0) * reward for name, reward in rewards.items()
         }
-        speed_reward = rewards["high_speed_reward"] + rewards["right_lane_reward"]
-        energy_reward = rewards["energy_consumption_reward"] + rewards["right_lane_reward"]
-        if rewards["collision_reward"] != 0:
-            speed_reward = 0 #TODO: this is just for testing, set back to 0 after
-            energy_reward = 0 #TODO: this is just for testing, set back to 0 after
-            return np.array([speed_reward, energy_reward])
+        speed_reward = rewards["high_speed_reward"] + rewards["right_lane_reward"] + rewards["collision_reward"]
+        energy_reward = rewards["energy_consumption_reward"] + rewards["right_lane_reward"] + rewards["collision_reward"]
         
         if self.config["normalize_reward"]:
             speed_reward = utils.lmap(speed_reward,
-                                [0,
+                                [self.config["collision_reward"],
                                     self.config["high_speed_reward"] + self.config["right_lane_reward"]],
                                 [0, 1])
             energy_reward = utils.lmap(energy_reward,
-                                [0,
+                                [self.config["collision_reward"],
                                     self.config["energy_consumption_reward"] + self.config["right_lane_reward"]],
                                 [0, 1])
+        if rewards["collision_reward"] != 0:
+           speed_reward = 0 #TODO: this is just for testing, set back to 0 after
+           energy_reward = 0 #TODO: this is just for testing, set back to 0 after
+                   
         return np.array([speed_reward, energy_reward])
 
     def _rewards(self, action: Action) -> Dict[Text, float]:
