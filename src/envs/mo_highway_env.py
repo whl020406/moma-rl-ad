@@ -130,3 +130,22 @@ class MOHighwayEnv(HighwayEnvFast):
                 vehicle.MIN_SPEED = min_speed
                 vehicle.objective_weights = torch.tensor([0.0,0.0], device=self.config["device"])
                 self.road.vehicles.append(vehicle)
+    
+    def _info(self, obs, action = None) -> dict:
+        """
+        Return a dictionary of additional information
+
+        :param obs: current observation
+        :param action: current action
+        :return: info dict
+        """
+        info = {
+            "speed": self.vehicle.speed,
+            "crashed": self.vehicle.crashed,
+            "action": action,
+        }
+        try:
+            info["rewards"] = self._reward(action)
+        except NotImplementedError:
+            pass
+        return info

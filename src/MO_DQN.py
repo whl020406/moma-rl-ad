@@ -11,6 +11,7 @@ from tqdm import trange
 from typing import List
 from pymoo.util.ref_dirs import get_reference_directions
 from DQN_Network import DQN_Network
+from mo_gymnasium import MONormalizeReward
 
 
 
@@ -24,14 +25,23 @@ class MO_DQN:
     def __init__(self, env: gym.Env | None, device: device = None, seed: int | None = None, 
         observation_space_shape: Sequence[int] = [1,1], num_objectives: int = 2, num_actions: int = 5, 
         replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, objective_weights: Sequence[float] = None,
-        loss_criterion: _Loss = nn.SmoothL1Loss,
-        objective_names: List[str] = None, scalarisation_method = LinearScalarisation, scalarisation_argument_list: List = []) -> None:
+        loss_criterion: _Loss = nn.SmoothL1Loss, gamma: float = 0.99,
+        objective_names: List[str] = None, scalarisation_method = LinearScalarisation, scalarisation_argument_list: List = [],
+        use_reward_normalisation_wrapper: bool = True) -> None:
         
+        self.gamma = gamma
+
         if objective_names is None:
             objective_names = [f"reward_{x}" for x in range(num_objectives)]
         
         assert len(objective_names) == num_objectives, "The number of elements in the objective_names list must be equal to the number of objectives!"
         self.objective_names = objective_names
+
+        self.use_reward_normalisation_wrapper = use_reward_normalisation_wrapper
+        #applies reward normalisation wrapper to all objectives
+        if use_reward_normalisation_wrapper:
+            for i in range(num_objectives):
+                env = MONormalizeReward(env, idx=i, gamma=self.gamma)
 
         self.env = env
             
@@ -80,7 +90,7 @@ class MO_DQN:
         return policy_net, target_net
 
     def train(self, num_iterations: int = 1000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 20, 
-              gamma: float = 0.9, epsilon_start: float = 0.05, epsilon_end: float = 0) :
+                epsilon_start: float = 0.05, epsilon_end: float = 0) :
         '''
         Runs the training procedure for num_iterations iterations. The inv_optimisation_frequency specifies 
         the number of iterations after which a weight update occurs.The inv_target_update_frequency specifies 
@@ -90,7 +100,6 @@ class MO_DQN:
         '''
         self.obs, _ = self.env.reset()
         self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
-        self.gamma = gamma
         self.epsilon = epsilon_start
         self.optimiser = torch.optim.AdamW(self.policy_net.parameters(), lr=1e-3, amsgrad=True)
 
@@ -241,12 +250,15 @@ class MO_DQN:
                     self.action = self.act(self.obs)
                     (
                     self.obs,
-                    self.reward,
+                    self.reward, #use that if no reward normalisation wrapper was applied
                     self.terminated,
                     self.truncated,
                     info,
                     ) = self.eval_env.step(self.action)
                     
+                    #if reward normalisation wrapper is utilised, take raw rewards from info dict
+                    if self.use_reward_normalisation_wrapper:
+                        self.reward = info["rewards"]
                     accumulated_reward = accumulated_reward + self.reward
                     curr_num_iterations += 1
 
