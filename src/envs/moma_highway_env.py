@@ -58,9 +58,11 @@ class MOMAHighwayEnv(HighwayEnvFast):
            to construct a reward array, containing the two-dimensional rewards for each vehicle. 
            The first vehicle in the second dimension corresponds to an ego-vehicle'''
         
+        num_close_vehicles = self.observation_type.agents_observation_types[0].vehicles_count
         reward_dict_lists = self._rewards(action)
-        reward_array = np.zeros(shape=(len(reward_dict_lists),len(reward_dict_lists[0]),2))#2 because we have two objectives
-
+        #rows with -1 indicate missing close vehicle
+        reward_array = np.ones(shape=(len(reward_dict_lists),num_close_vehicles,2)) * (-1) #2 because we have two objectives
+        
         for i, dict_list in enumerate(reward_dict_lists):
             for j, reward_dict in enumerate(dict_list):
                 reward_array[i,j,:] = self._compute_vehicle_reward(reward_dict)

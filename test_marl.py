@@ -31,7 +31,7 @@ obs, info = env.reset()
 
 moma_agent = MOMA_DQN.MOMA_DQN(env, num_objectives=2, seed=11, observation_space_shape=obs[0].shape, replay_buffer_size=200, batch_ratio=0.3,
                       objective_names=["speed_reward", "energy_reward"])
-moma_agent.train(50_000, epsilon_start=0.9, epsilon_end=0.0)
+moma_agent.train(100, epsilon_start=0.9, epsilon_end=0.0)
 
 df = moma_agent.evaluate(num_repetitions= 20, hv_reference_point=np.ndarray([0,0]), seed=11, episode_recording_interval=None)
 print(df)

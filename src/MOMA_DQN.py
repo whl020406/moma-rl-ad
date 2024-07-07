@@ -25,14 +25,16 @@ class MOMA_DQN:
         observation_space_shape: Sequence[int] = [1,1], num_objectives: int = 2, num_actions: int = 5, 
         replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, objective_weights: Sequence[float] = None,
         loss_criterion: _Loss = nn.SmoothL1Loss, observation_space_type = AugmentedMultiAgentObservation,
-        objective_names: List[str] = None, scalarisation_method = LinearScalarisation, scalarisation_argument_list: List = []) -> None:
+        objective_names: List[str] = None, scalarisation_method = LinearScalarisation, scalarisation_argument_list: List = [],
+        ego_reward_priority: float = 0.5, separate_ego_and_social_reward: bool = True) -> None:
         
         if objective_names is None:
             objective_names = [f"reward_{x}" for x in range(num_objectives)]
         
         assert len(objective_names) == num_objectives, "The number of elements in the objective_names list must be equal to the number of objectives!"
         self.objective_names = objective_names
-
+        self.ego_reward_priority = ego_reward_priority
+        self.separate_ego_and_social_reward = separate_ego_and_social_reward
         self.env = env
         self.num_controlled_vehicles = len(self.env.unwrapped.controlled_vehicles)
         self.observation_space_type = observation_space_type
@@ -165,14 +167,16 @@ class MOMA_DQN:
             #this can happen when one of the next vehicle is far away from ego
             #thus we need to bring it to the same shape
             if r.shape[0] > weights.shape[0]:
-                assert torch.all(r[weights.shape[0]+1:] == 0) #make sure all rewards beyond this point are 0 anyway
+                assert torch.all(r[weights.shape[0]+1:] == -1) #make sure all rewards beyond this point are -1
                 r = r[:weights.shape[0]] #remove all excess rows from r
             
             weighted_reward = r * weights
             ego_reward = weighted_reward[0,:]
-            social_reward = weighted_reward[1:,:]
-            mean_social_reward = torch.sum(social_reward,dim=0) / (social_reward.shape[0]) #-1 to exclude the ego vehicle
-            
+            if weighted_reward.shape[0] > 1:
+                social_reward = weighted_reward[1:,:]
+                mean_social_reward = torch.sum(social_reward,dim=0) / (social_reward.shape[0]) #-1 to exclude the ego vehicle
+            else:
+                mean_social_reward = torch.tensor([0,0], device=self.device) #when no other vehicles are around the ego vehicle
             #this means, in replay buffer, the first num_objectives elements in the reward are the ego reward 
             #and the other two are the mean social reward
             reward_summary.append(torch.hstack([ego_reward, mean_social_reward]))
@@ -182,8 +186,6 @@ class MOMA_DQN:
 
     def __update_weights(self, current_optimisation_iteration, inv_target_update_frequency):
         #TODO: adjust to work in MOMA setting
-        #update normal network each time the function is called
-        #update target network every k steps
 
         #fetch samples from replay buffer
         batch_samples = self.buffer.sample(round(self.buffer.num_elements*self.batch_ratio))
@@ -194,8 +196,10 @@ class MOMA_DQN:
         rewards  = self.buffer.get_rewards(batch_samples)
         #go through each sample of the batch
         #fetch Q values of the current observation and action from all the objectives Q-networks
-        #if (observations.shape[0] > 1):
-        #    print(observations.shape)
+        
+        if self.separate_ego_and_social_reward:
+            actions = actions[:,0:self.num_objectives,:]
+
         state_action_values = self.policy_net(observations)
         state_action_values = state_action_values.gather(2, actions)
         state_action_values = state_action_values.reshape(observations.shape[0],self.num_objectives)
@@ -203,8 +207,14 @@ class MOMA_DQN:
         with torch.no_grad():
             next_state_values = self.target_net(next_obs).max(2).values
         next_state_values[term_flags] = 0
-            
-        exp_state_action_values = next_state_values * self.gamma + rewards
+
+        ego_rewards = rewards[:,0:self.num_objectives]
+        mean_social_rewards = rewards[:,self.num_objectives:]
+
+        #uses ego and mean social rewards
+        exp_state_action_values = next_state_values * self.gamma + \
+        (ego_rewards * self.ego_reward_priority + mean_social_rewards * (1-self.ego_reward_priority))
+
         #compute loss between estimates and actual values
         loss = self.loss_func(state_action_values, exp_state_action_values)
         #backpropagate loss
@@ -268,7 +278,12 @@ class MOMA_DQN:
         for tuple_index in trange(objective_weights.shape[0], desc="Weight tuple", mininterval=1):#
             weight_tuple = objective_weights[tuple_index]
             self.objective_weights = weight_tuple
-            
+
+            # explicitly set objective weights in the environment object as well
+            # so that observations are correct
+            for v in self.env.unwrapped.controlled_vehicles:
+                v.objective_weights = self.objective_weights
+
             for repetition_nr in range(num_repetitions):
                 self.terminated = False
                 self.truncated = False
@@ -280,8 +295,8 @@ class MOMA_DQN:
                         self.eval_env.render()
 
                     #select action based on obs. Execute action, add up reward, next iteration
-                    self.obs = [torch.tensor(single_obs.reshape(1,-1), device=self.device) for single_obs in self.obs] #reshape observations
-                    self.obs = [single_obs[single_obs != np.nan] for single_obs in self.obs] #remove nan values
+                    self.obs = [torch.tensor(single_obs, device=self.device) for single_obs in self.obs] #reshape observations and
+                    self.obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.obs] #remove nan values
                     self.action = self.act(self.obs)
                     (
                     self.obs,
