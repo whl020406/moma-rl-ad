@@ -186,9 +186,6 @@ class MOMAHighwayEnv(HighwayEnvFast):
         """
         Override this function originally defined in the AbstractEnv class to work with my augmented observation space
         """
-        #self.env.unwrapped.observation_type = self.observation_space_type(env = self.env, **self.env.unwrapped.config["observation"])
-        #self.env.unwrapped.observation_space = self.env.observation_type.space()
-
         self.observation_type = AugmentedMultiAgentObservation(env = self, observation_config=self.unwrapped.config["observation"])
         self.action_type = action_factory(self, self.config["action"])
         self.observation_space = self.observation_type.space()

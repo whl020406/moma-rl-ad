@@ -2,14 +2,15 @@ from typing import Dict, Text
 import numpy as np
 from highway_env import utils
 from highway_env.envs import HighwayEnvFast
-from highway_env.vehicle.controller import MDPVehicle
 from highway_env.vehicle.kinematics import Vehicle
-from highway_env.envs.common.action import Action
 from highway_env.vehicle.controller import ControlledVehicle
 from highway_env.utils import near_split
 from energy_calculation import NaiveEnergyCalculation
 import torch
 from utils import random_objective_weights
+from highway_env.envs.common.action import action_factory, Action
+from highway_env.envs.common.observation import observation_factory
+from utils import AugmentedMultiAgentObservation
 
 class MOHighwayEnv(HighwayEnvFast):
     '''Extends the standard highway environment to work with multiple objectives. The code was taken straight
@@ -149,3 +150,21 @@ class MOHighwayEnv(HighwayEnvFast):
         except NotImplementedError:
             pass
         return info
+
+    def define_spaces(self) -> None:
+        """
+        Override this function originally defined in the AbstractEnv class to work with my augmented observation space
+        """
+        try:
+            self.observation_type = observation_factory(self, self.config["observation"])
+            self.action_type = action_factory(self, self.config["action"])
+            self.observation_space = self.observation_type.space()
+            self.action_space = self.action_type.space()
+        except:
+            if self.unwrapped.config["observation"]["type"] == "AugmentedMultiAgentObservation":
+                self.observation_type = AugmentedMultiAgentObservation(env = self, observation_config=self.unwrapped.config["observation"])
+                self.action_type = action_factory(self, self.config["action"])
+                self.observation_space = self.observation_type.space()
+                self.action_space = self.action_type.space()
+            else:
+                raise Exception("Observation space cannot be applied!")

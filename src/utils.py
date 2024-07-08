@@ -56,7 +56,7 @@ class AugmentedKinematicObservation(KinematicObservation):
        various points.'''
 
 
-    FEATURES: List[str] = ['presence', 'x', 'y', 'vx', 'vy']
+    FEATURES: List[str] = ['presence', 'x', 'y', 'vx', 'vy', "lane_info"]
 
     def __init__(self, env: 'AbstractEnv',
                  features: List[str] = None,
@@ -86,6 +86,7 @@ class AugmentedKinematicObservation(KinematicObservation):
         super().__init__(env)
         self.num_objectives = num_objectives #add num objectives for use in space function
         self.features = features or self.FEATURES
+        self.standard_features = self.get_standard_features(self.features)
         self.vehicles_count = vehicles_count
         self.features_range = features_range
         self.absolute = absolute
@@ -95,22 +96,37 @@ class AugmentedKinematicObservation(KinematicObservation):
         self.see_behind = see_behind
         self.observe_intentions = observe_intentions
 
+    def get_standard_features(self, features):
+        standard_features = features.copy()
+        additional_features = ['obj_weights', 'lane_info']
+        for a in additional_features:
+            if a in standard_features:
+                standard_features.remove(a)
+
+        return standard_features
     def space(self) -> spaces.Space:
-        # 
-        return spaces.Box(shape=(self.vehicles_count, len(self.features)+1+self.num_objectives), low=-np.inf, high=np.inf, dtype=np.float32)
+        self.num_features = len(self.features)
+        if "obj_weights" in self.features:
+            self.num_features += self.num_objectives
+        return spaces.Box(shape=(self.vehicles_count, self.num_features), low=-np.inf, high=np.inf, dtype=np.float32)
 
     def observe(self) -> Tuple[np.ndarray, List[Vehicle]]:
         vehicle_list = []
+        augment_dict = {}
         vehicle_list.append(self.observer_vehicle) #add current ego vehicle at first position of vehicle list
         if not self.env.road:
             return np.zeros(self.space().shape)
 
         # Add ego-vehicle
-        df = pd.DataFrame.from_records([self.observer_vehicle.to_dict()])[self.features] #add standard features
+        df = pd.DataFrame.from_records([self.observer_vehicle.to_dict()])[self.standard_features] #add standard features
 
         #add objective weights features and is_controlled flag to ego vehicle observation
-        augment_dict = {"is_controlled": self.observer_vehicle.is_controlled}
-        augment_dict.update({f"objective_weights_{n}": np.nan for n, w in enumerate(self.observer_vehicle.objective_weights)})
+        if "obj_weights" in self.features:
+            augment_dict.update({"is_controlled": self.observer_vehicle.is_controlled})
+            augment_dict.update({f"objective_weights_{n}": np.nan for n, w in enumerate(self.observer_vehicle.objective_weights)})
+        if "lane_info" in self.features:
+            augment_dict.update({"lane": self.observer_vehicle.lane_index[2]})
+
         augment_df = pd.DataFrame.from_records([augment_dict])
         df = pd.concat([df,augment_df], axis=1)
         
@@ -125,14 +141,21 @@ class AugmentedKinematicObservation(KinematicObservation):
             origin = self.observer_vehicle if not self.absolute else None
             others_standard_df = pd.DataFrame.from_records(
                 [v.to_dict(origin, observe_intentions=self.observe_intentions)
-                 for v in close_vehicles[-self.vehicles_count + 1:]])[self.features]
+                 for v in close_vehicles[-self.vehicles_count + 1:]])[self.standard_features]
             
             #add additional features (objective weights and is_controlled flag for all of the close vehicles)
-            augment_dict_list = [dict(
+            augment_dict_list = []
+            for v in close_vehicles[-self.vehicles_count + 1:]:
+                v_dict = {}
+                if "obj_weights" in self.features:
+                    v_dict.update(dict(
                                 {"is_controlled": v.is_controlled},
                                 **{f"objective_weights_{n}": float(w) for n, w in enumerate(v.objective_weights)}
-                                )
-                            for v in close_vehicles[-self.vehicles_count + 1:]]
+                                ))
+                if "lane_info" in self.features:
+                    v_dict["lane"] = v.lane_index[2]
+                
+                augment_dict_list.append(v_dict)
             
             others_augment_df = pd.DataFrame.from_records(augment_dict_list)
 
@@ -147,7 +170,7 @@ class AugmentedKinematicObservation(KinematicObservation):
             df = self.normalize_obs(df, MAX_SPEED, MIN_SPEED)
         # Fill missing rows
         if df.shape[0] < self.vehicles_count:
-            rows = np.zeros((self.vehicles_count - df.shape[0], len(self.features)+1+self.num_objectives))
+            rows = np.zeros((self.vehicles_count - df.shape[0], self.num_features))
             df = pd.concat([df, pd.DataFrame(data=rows, columns=df.columns)], ignore_index=True)
         # Reorder
         obs = df.values.copy()

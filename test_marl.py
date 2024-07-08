@@ -5,6 +5,7 @@ from src import MOMA_DQN
 from matplotlib import pyplot as plt
 import matplotlib
 import pandas as pd
+import torch
 
 env = mo_gym.make('moma-highway-env-v0', render_mode='rgb_array')
 env.unwrapped.configure({
@@ -28,8 +29,9 @@ env.unwrapped.configure({
 })
 
 obs, info = env.reset()
-
-moma_agent = MOMA_DQN.MOMA_DQN(env, num_objectives=2, seed=11, observation_space_shape=obs[0].shape, replay_buffer_size=200, batch_ratio=0.3,
+obs = [torch.tensor(single_obs) for single_obs in obs] #reshape observations and
+obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in obs] #remove nan values
+moma_agent = MOMA_DQN.MOMA_DQN(env, num_objectives=2, seed=11, observation_space_length=obs[0].shape[1], replay_buffer_size=200, batch_ratio=0.3,
                       objective_names=["speed_reward", "energy_reward"])
 moma_agent.train(100, epsilon_start=0.9, epsilon_end=0.0)
 

@@ -19,7 +19,8 @@ env.unwrapped.configure({
         "observation_config": {
             "type": "Kinematics",
             "see_behind": False,
-            "normalize": True
+            "normalize": False,
+            "features": ['presence', 'x', 'y', 'vx', 'vy']
         }
     },
 })
@@ -32,7 +33,7 @@ truncated = False
 while True:
     #print(env.get_wrapper_attr('get_available_actions')())
     obs, reward, done, truncated, info = env.step(env.action_space.sample())
-    print(reward)
+    print(obs[0])
     env.render()
 
 plt.imshow(env.render())

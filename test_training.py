@@ -4,14 +4,14 @@ from matplotlib import pyplot as plt
 import numpy as np
 from src import MO_DQN
 
-env = mo_gym.make('circle-env-v0', render_mode='rgb_array')
+env = mo_gym.make('mo-highway-env-v0', render_mode='rgb_array')
 env.unwrapped.configure({
     "screen_width": 500,
     "screen_height": 500,
     "observation": {
-        "type": "MultiAgentObservation",
+        "type": "AugmentedMultiAgentObservation",#MultiAgentObservation
         "observation_config": {
-            "type": "Kinematics",
+            "type": "Kinematics"
         }
     }
 })
@@ -20,7 +20,7 @@ env.unwrapped.configure({
 })
 
 obs, info = env.reset()
-
-agent = MO_DQN.MO_DQN(env, num_objectives=1, seed=11, observation_space_shape=obs[0].shape, epsilon=0.1, episode_recording_interval=3)
+print(obs)
+agent = MO_DQN.MO_DQN(env, num_objectives=1, seed=11, observation_space_shape=obs[0].shape, episode_recording_interval=3)
 df = agent.train(1000, target_update_frequency=10)
 print(df)

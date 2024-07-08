@@ -22,7 +22,7 @@ class MOMA_DQN:
     """
 
     def __init__(self, env: gym.Env | None, device: device = None, seed: int | None = None, 
-        observation_space_shape: Sequence[int] = [1,1], num_objectives: int = 2, num_actions: int = 5, 
+        observation_space_length: int = 30, num_objectives: int = 2, num_actions: int = 5, 
         replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, objective_weights: Sequence[float] = None,
         loss_criterion: _Loss = nn.SmoothL1Loss, observation_space_type = AugmentedMultiAgentObservation,
         objective_names: List[str] = None, scalarisation_method = LinearScalarisation, scalarisation_argument_list: List = [],
@@ -52,13 +52,12 @@ class MOMA_DQN:
             self.objective_weights = random_objective_weights(self.num_objectives, self.rng, self.device)
 
         self.num_actions = num_actions
-        self.observation_space_shape = observation_space_shape
 
-        self.observation_space_length = np.cumprod(observation_space_shape)[-1]
+        self.observation_space_length = observation_space_length
 
         #minus term because the objective weights of the ego vehicle are excluded
         (self.policy_net, self.target_net) = \
-        self.__create_network(self.observation_space_length-self.num_objectives, self.num_actions, self.num_objectives)
+        self.__create_network(self.observation_space_length, self.num_actions, self.num_objectives)
 
         self.replay_enabled = replay_enabled
         self.rb_size = replay_buffer_size
@@ -68,7 +67,7 @@ class MOMA_DQN:
 
         #initialise replay buffer
         #*2 for num_objectives because we want to store the rewards of the ego vehicle and the mean reward of close vehicles separately
-        self.buffer = ReplayBuffer(self.rb_size, self.observation_space_length-self.num_objectives, self.num_objectives*2, self.device, self.rng, importance_sampling=True)
+        self.buffer = ReplayBuffer(self.rb_size, self.observation_space_length, self.num_objectives*2, self.device, self.rng, importance_sampling=True)
 
         #initialise reward logger
         feature_names = ["episode"]
@@ -120,6 +119,7 @@ class MOMA_DQN:
                     self.truncated,
                     info,
                 ) = self.env.step(self.actions)
+                
                 self.crashed = info["crashed"]
                 self.vehicle_obj_weights = info["vehicle_objective_weights"]
                 #accumulate episode reward
