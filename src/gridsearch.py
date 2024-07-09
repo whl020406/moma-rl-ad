@@ -2,6 +2,7 @@ from tqdm import tqdm
 import itertools
 import pandas as pd
 import numpy as np
+import os
 
 def increment_indices(current_indices, max_indices):
     '''
@@ -59,18 +60,31 @@ def create_dataframe_from_results(algorithm_config, parameter_values_list, metri
     df_results["algorithm"] = algorithm_name #append information on which search algorithm was used
     return df_results
 
+def add_metadata(df: pd.DataFrame, parameters, env_config_id):
+    df["env_config_id"] = env_config_id
 
+    for parameter_name, value in parameters.items():
+        df[parameter_name] = value
+    
+    return df
 
-def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_location: str = "data/"):
+def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_path: str = "data/", experiment_name: str = "experiment"):
     '''This function conducts gridsearch on a specific algorithm and environment in an effort to find optimal hyperparameters.
        The parameters to explore are defined in the run_config dictionary.
        The function generates a csv file of the evaluation results for each combination of hyperparameters
     '''
 
+    #create directory to store experiment results if it is not there already
+    if not os.path.isdir(csv_file_path):
+        print("Directory",csv_file_path, "doesn't exist. Creating it now...")
+        os.makedirs(csv_file_path)
+    file_path = csv_file_path + experiment_name
+
     max_parameter_indices = np.array([len(x)-1 for x in run_config["init"].values()], dtype=int) #compute the maximum indices for each config parameter
     num_of_experiments = np.cumprod(max_parameter_indices + 1)[-1] #compute the number of experiments to run based on number of values in config
     
     #run all experiments
+    df_list = []
     for env_config_id in tqdm(range(len(run_config["env"]["observation"])), desc="Environment", position=1, leave=False):
         current_parameter_indices = np.zeros(len(run_config["init"]), dtype= int) #initialise current parameter indices to 0
         current_env_config = {k:v[env_config_id] for k,v in run_config["env"].items()}
@@ -79,13 +93,13 @@ def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_locati
             parameters = fetch_algorithm_parameters(run_config["init"], current_parameter_indices)
             obs, _ = env.reset()
             agent = algorithm(env = env, num_objectives = 2, seed = seed, observation_space_shape = obs[0].shape, num_actions = 5, objective_names=["speed_reward", "energy_reward"], **parameters)
+            agent.train(**run_config["train"])
             df = agent.evaluate(**run_config["eval"])
-            df = add_metadata(df, parameters, run_config, env_config_id)
+            df = add_metadata(df, parameters, env_config_id)
+            df.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}.csv")
+            df_list.append(df)
             #increment indices of the current algorithm's parameters
             current_parameter_indices = increment_indices(current_parameter_indices, max_parameter_indices)
     
-    #df = create_dataframe_from_results(algorithm_config, parameter_values_list, metric_results_list, stored_solutions_list, num_of_experiments,
-    #                                METRIC_FEATURE_NAMES, algorithm_name= algorithm.__name__)
-
-    # save dataframe to csv file
-    #df.to_csv(run_config["optimisation_algorithm"][optimiser_id].__name__+"_results.csv")
+    df = pd.concat(df_list)
+    df.to_csv(f"{file_path}_merged.csv")

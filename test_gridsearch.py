@@ -41,11 +41,11 @@ run_config = {
     },
     "init": {
          "gamma": [0.9],
-         "replay_buffer_size": [200, 1000],
+         "replay_buffer_size": [200,1000], 
          "use_reward_normalisation_wrapper": [False, True]
     },
     "train": {
-         "num_iterations" : 500, #change to 200_000
+         "num_iterations" : 100_000,
          "inv_target_update_frequency": 20,
          "epsilon_start": 0.9,
          "epsilon_end": 0
@@ -61,4 +61,4 @@ run_config = {
 
 
 env = mo_gym.make('mo-highway-env-v0', render_mode='rgb_array')
-gridsearch(MO_DQN, env, run_config, 11)
+gridsearch(MO_DQN, env, run_config, 11, csv_file_path="data/mo_gridsearch_exp/")

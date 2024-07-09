@@ -23,10 +23,11 @@ class MOMA_DQN:
 
     def __init__(self, env: gym.Env | None, device: device = None, seed: int | None = None, 
         observation_space_length: int = 30, num_objectives: int = 2, num_actions: int = 5, 
-        replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, objective_weights: Sequence[float] = None,
-        loss_criterion: _Loss = nn.SmoothL1Loss, observation_space_type = AugmentedMultiAgentObservation,
-        objective_names: List[str] = None, scalarisation_method = LinearScalarisation, scalarisation_argument_list: List = [],
-        ego_reward_priority: float = 0.5, separate_ego_and_social_reward: bool = True) -> None:
+        replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, 
+        objective_weights: Sequence[float] = None, loss_criterion: _Loss = nn.SmoothL1Loss, 
+        objective_names: List[str] = None, scalarisation_method = LinearScalarisation, 
+        scalarisation_argument_list: List = [],ego_reward_priority: float = 0.5, 
+        separate_ego_and_social_reward: bool = True) -> None:
         
         if objective_names is None:
             objective_names = [f"reward_{x}" for x in range(num_objectives)]
@@ -37,7 +38,6 @@ class MOMA_DQN:
         self.separate_ego_and_social_reward = separate_ego_and_social_reward
         self.env = env
         self.num_controlled_vehicles = len(self.env.unwrapped.controlled_vehicles)
-        self.observation_space_type = observation_space_type
             
         self.rng = np.random.default_rng(seed)
         torch.manual_seed(seed)
@@ -270,7 +270,7 @@ class MOMA_DQN:
         objective_weights = get_reference_directions("energy", n_dim = self.num_objectives, n_points = num_points, seed=seed)
         objective_weights = torch.from_numpy(objective_weights).to(self.device)
         
-        feature_names = ["repetition_number", "weight_index","weight_tuple", "num_iterations"]
+        feature_names = ["repetition_number", "weight_index","weight_tuple", "num_iterations", "vehicle_id"]
         feature_names.extend([f"normalised_{x}" for x in self.objective_names])
         feature_names.extend([f"raw_{x}" for x in self.objective_names])
         eval_logger = DataLogger("evaluation_logger",feature_names)
@@ -279,16 +279,16 @@ class MOMA_DQN:
             weight_tuple = objective_weights[tuple_index]
             self.objective_weights = weight_tuple
 
-            # explicitly set objective weights in the environment object as well
-            # so that observations are correct
-            for v in self.env.unwrapped.controlled_vehicles:
-                v.objective_weights = self.objective_weights
-
             for repetition_nr in range(num_repetitions):
                 self.terminated = False
                 self.truncated = False
-                self.obs, _ = self.eval_env.reset()                
-                accumulated_reward = np.zeros(self.num_objectives)
+                self.obs, _ = self.eval_env.reset()     
+                # explicitly set objective weights in the environment object as well
+                # so that observations are correct
+                # currently every controlled vehicle has the same objective weights
+                for v in self.env.unwrapped.controlled_vehicles:
+                    v.objective_weights = self.objective_weights           
+                accumulated_reward = np.zeros(shape=(self.num_controlled_vehicles, self.num_objectives))
                 curr_num_iterations = 0
                 while not (self.terminated or self.truncated):
                     if render_episodes:
@@ -306,12 +306,22 @@ class MOMA_DQN:
                     info,
                     ) = self.eval_env.step(self.action)
                     
-                    accumulated_reward = accumulated_reward + self.reward
+                    for vehicle_id in range(self.num_controlled_vehicles):
+                        #select only the rewards for a specific controlled vehicle
+                        vehicle_rewards = self.reward[vehicle_id]
+                        valid_reward_indices = ~np.all(vehicle_rewards == -1, axis=1)
+                        vehicle_rewards = vehicle_rewards[valid_reward_indices]
+
+                        #compute rewards and add them to the accumulated reward array
+                        vehicle_rewards =  np.sum(vehicle_rewards, axis=0) / vehicle_rewards.shape[0]
+                        accumulated_reward[vehicle_id] += vehicle_rewards
+
                     curr_num_iterations += 1
 
                 #episode ended
                 normalised_reward = accumulated_reward / curr_num_iterations
-                eval_logger.add(repetition_nr, tuple_index, weight_tuple.tolist(), curr_num_iterations, *normalised_reward.tolist(), *accumulated_reward.tolist())
+                for vehicle_id in range(self.num_controlled_vehicles):
+                    eval_logger.add(repetition_nr, tuple_index, weight_tuple.tolist(), curr_num_iterations, vehicle_id, *normalised_reward[vehicle_id].tolist(), *accumulated_reward[vehicle_id].tolist())
                 
         return eval_logger.to_dataframe()
 
