@@ -30,7 +30,10 @@ class AugmentedMultiAgentObservation(ObservationType):
         self.observation_config = observation_config
         self.agents_observation_types = []
         for vehicle in self.env.controlled_vehicles:
-            obs_type = AugmentedKinematicObservation(env, **observation_config)
+            if "observation_config" in observation_config:
+                obs_type = AugmentedKinematicObservation(env, **observation_config["observation_config"])
+            else: 
+                obs_type = AugmentedKinematicObservation(env, **observation_config)
             obs_type.observer_vehicle = vehicle
             self.agents_observation_types.append(obs_type)
 
@@ -68,8 +71,7 @@ class AugmentedKinematicObservation(KinematicObservation):
                  clip: bool = True,
                  see_behind: bool = False,
                  observe_intentions: bool = False,
-                 num_objectives: int = 2,
-                 **kwargs: dict) -> None:
+                 num_objectives: int = 2, **kwargs) -> None:
         """
         :param env: The environment to observe
         :param features: Names of features used in the observation
