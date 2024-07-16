@@ -18,7 +18,7 @@ class MOCircleEnv(CircleEnv):
             "high_speed_reward": 1,
             "lane_change_reward": -0.05,
             "energy_consumption_reward": 1,
-            "right_lane_reward": 0.2,
+            "right_lane_reward": 0.1,
             "normalize_reward": True,
             "energy_consumption_function": NaiveEnergyCalculation
             })
@@ -26,20 +26,20 @@ class MOCircleEnv(CircleEnv):
 
     def _reward(self, action: int) -> float:
         rewards = self._rewards(action)
-        rewards = {
+        scalarised_rewards = {
             name: self.config.get(name, 0) * reward for name, reward in rewards.items()
         }
         #merge some rewards together (penalty rewards and right lane reward with high-speed and energy reward) corresponding to user-defined parameter function
-        speed_reward =  rewards["high_speed_reward"] + rewards["lane_change_reward"] + rewards["right_lane_reward"]
-        energy_reward = rewards["energy_consumption_reward"] + rewards["lane_change_reward"] + rewards["right_lane_reward"]
+        speed_reward =  scalarised_rewards["high_speed_reward"] + scalarised_rewards["lane_change_reward"] + scalarised_rewards["right_lane_reward"]
+        energy_reward = scalarised_rewards["energy_consumption_reward"] + scalarised_rewards["lane_change_reward"] + scalarised_rewards["right_lane_reward"]
         
         if self.config["normalize_reward"]:
             speed_reward, energy_reward =  self.__normalize_rewards([speed_reward, energy_reward])
 
+        #rewards["collision_reward"] indicates whether there has been a crash
         if rewards["collision_reward"] != 0:
-            speed_reward = 0
-            energy_reward = 0
-            return np.array([speed_reward, energy_reward])
+            speed_reward = self.config["collision_reward"]
+            energy_reward = self.config["collision_reward"]
             
         return np.array([speed_reward, energy_reward])
     
@@ -67,12 +67,12 @@ class MOCircleEnv(CircleEnv):
         energy_reward = rewards[1]
 
         speed_reward = utils.lmap(speed_reward,
-                                [0,
+                                [self.config["lane_change_reward"],
                                     self.config["high_speed_reward"] + self.config["right_lane_reward"]],
                                 [0, 1])
         
         energy_reward = utils.lmap(energy_reward,
-                                [0,
+                                [self.config["lane_change_reward"],
                                     self.config["energy_consumption_reward"] + self.config["right_lane_reward"]],
                                 [0, 1])
         

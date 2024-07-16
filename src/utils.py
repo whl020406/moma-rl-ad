@@ -371,8 +371,9 @@ def random_objective_weights(num_objectives: int, rng: np.random.Generator, devi
     return random_weights
 
 
-def calc_hypervolume(reference_point, reward_vector):
+def calc_hypervolume(reference_point: np.ndarray = np.array([0,0]), reward_vector: np.ndarray = None):
     '''reference point represents the worst possible value'''
+    assert reward_vector is not None, "You have to provide a reward vector!"
     reward_vector = reward_vector * (-1) # convert to minimisation problem
     ind = HV(ref_point=reference_point)
     return ind(reward_vector)

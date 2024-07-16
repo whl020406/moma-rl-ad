@@ -70,26 +70,38 @@ class MOMAHighwayEnv(HighwayEnvFast):
     
     def _compute_vehicle_reward(self, reward_dict):
         '''Computes the reward tuple for a single vehicle based on the information in the reward dictionary.'''
-        rewards = {
-            name: self.config.get(name, 0) * reward for name, reward in reward_dict.items()
+        rewards = reward_dict
+        scalarised_rewards = {
+            name: self.config.get(name, 0) * reward for name, reward in rewards.items()
         }
-        speed_reward = rewards["high_speed_reward"] + rewards["right_lane_reward"]
-        energy_reward = rewards["energy_consumption_reward"] + rewards["right_lane_reward"]
-        if rewards["collision_reward"] != 0:
-            speed_reward = 0 
-            energy_reward = 0 
-            return np.array([speed_reward, energy_reward])
+        speed_reward = scalarised_rewards["high_speed_reward"] + scalarised_rewards["right_lane_reward"]
+        energy_reward = scalarised_rewards["energy_consumption_reward"] + scalarised_rewards["right_lane_reward"]
         
         if self.config["normalize_reward"]:
-            speed_reward = utils.lmap(speed_reward,
+            speed_reward, energy_reward = self.__normalize_rewards([speed_reward, energy_reward])
+
+        #rewards["collision_reward"] indicates whether there has been a crash
+        if rewards["collision_reward"] != 0:
+           speed_reward = self.config["collision_reward"]
+           energy_reward = self.config["collision_reward"]
+
+        return np.array([speed_reward, energy_reward])
+    
+    def __normalize_rewards(self, rewards):
+        speed_reward = rewards[0]
+        energy_reward = rewards[1]
+
+        speed_reward = utils.lmap(speed_reward,
                                 [0,
                                     self.config["high_speed_reward"] + self.config["right_lane_reward"]],
                                 [0, 1])
-            energy_reward = utils.lmap(energy_reward,
+        
+        energy_reward = utils.lmap(energy_reward,
                                 [0,
                                     self.config["energy_consumption_reward"] + self.config["right_lane_reward"]],
                                 [0, 1])
-        return np.array([speed_reward, energy_reward])
+        
+        return speed_reward, energy_reward
 
     def _rewards(self, action: Action) -> Dict[Text, float]:
         '''constructs the reward dictionaries for each vehicle using the variable curr_observation_vehicle_lists in

@@ -34,7 +34,7 @@ class MOHighwayEnv(HighwayEnvFast):
             "ego_spacing": 2,
             "vehicles_density": 1,
             "collision_reward": -1,    # The reward received when colliding with a vehicle.
-            "right_lane_reward": 0.2,  # The reward received when driving on the right-most lanes, linearly mapped to
+            "right_lane_reward": 0.1,  # The reward received when driving on the right-most lanes, linearly mapped to
                                        # zero for other lanes.
             "high_speed_reward": 1,  # The reward received when driving at full speed, linearly mapped to zero for
                                        # lower speeds according to config["reward_speed_range"].
@@ -64,9 +64,10 @@ class MOHighwayEnv(HighwayEnvFast):
         else:
             self.raw_rewards = scalarised_rewards #store raw rewards for info function
         
+        #rewards["collision_reward"] indicates whether there has been a crash
         if rewards["collision_reward"] != 0:
-           speed_reward = self.config["collision_reward"] #TODO: this is just for testing, set back to 0 after
-           energy_reward = self.config["collision_reward"] #TODO: this is just for testing, set back to 0 after
+           speed_reward = self.config["collision_reward"]
+           energy_reward = self.config["collision_reward"]
                    
         return np.array([speed_reward, energy_reward])
 
