@@ -28,8 +28,7 @@ env.unwrapped.configure({
                 "vx": [-20, 20],
                 "vy": [-20, 20]
             },
-            #"grid_size": [[-27.5, 27.5], [StraightLane.DEFAULT_WIDTH * (-2), StraightLane.DEFAULT_WIDTH * 2]],
-            "grid_size": [[-10, 10], [-20,20]],
+            "grid_size": [[-27.5, 27.5], [-27.5, 27.5]],
             "grid_step": [5, 5],
             "align_to_vehicle_axes": False,
         }
@@ -42,9 +41,7 @@ env.reset()
 done = False
 truncated = False
 while True:
-    #print(env.get_wrapper_attr('get_available_actions')())
     obs, reward, done, truncated, info = env.step(1)
-    #print(env.unwrapped.controlled_vehicles[0].position)
     print(obs[0][0])
     env.render()
 

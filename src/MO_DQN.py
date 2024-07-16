@@ -12,6 +12,9 @@ from typing import List
 from pymoo.util.ref_dirs import get_reference_directions
 from DQN_Network import DQN_Network
 from mo_gymnasium import MONormalizeReward
+from copy import deepcopy
+from src.utils import calc_hypervolume
+import pandas as pd
 
 
 
@@ -75,11 +78,6 @@ class MO_DQN:
         #initialise replay buffer
         self.buffer = ReplayBuffer(self.rb_size, np.cumprod(observation_space_shape)[-1], self.num_objectives, self.device, self.rng, prioritise_crashes=False)
 
-        #initialise reward logger
-        feature_names = ["episode"]
-        feature_names.extend(self.objective_names)
-        self.reward_logger = DataLogger("reward_logger",feature_names)
-
         #initialise scalarisation function
         self.scalarisation_method = scalarisation_method(*scalarisation_argument_list)
 
@@ -93,21 +91,34 @@ class MO_DQN:
         return policy_net, target_net
 
     def train(self, num_iterations: int = 1000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 20, 
-                epsilon_start: float = 0.05, epsilon_end: float = 0) :
+                epsilon_start: float = 0.05, epsilon_end: float = 0, num_evaluations: int = 0, eval_seed: int = 11) :
         '''
         Runs the training procedure for num_iterations iterations. The inv_optimisation_frequency specifies 
         the number of iterations after which a weight update occurs.The inv_target_update_frequency specifies 
         the number of weight updates of the policy net, after which the target net weights are adjusted.
         Gamma is the discount factor for the rewards. Epsilon is the probability of a random action being selected during training.
         Its value is linearly reduced during the training procedure from epsilon_start to epsilon_end.
+        num_evaluations specifies the number of equally spaced evaluation runs that are conducted throughout the training process.
         '''
+        #compute evaluation interval
+        if num_evaluations != 0:
+            eval_interval = round(num_iterations/num_evaluations)
+        
+        #initialise loss logger
+        feature_names = ["iteration", "loss"]
+        self.loss_logger = DataLogger("loss_logger",feature_names)
+
+        #initialise hv_logger
+        feature_names = ["iteration", "hypervolume"]
+        hv_logger = DataLogger("hv_logger", feature_names)
+
+
         self.obs, _ = self.env.reset()
         self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
         self.epsilon = epsilon_start
         self.optimiser = torch.optim.AdamW(self.policy_net.parameters(), lr=1e-3, amsgrad=True)
 
         self.loss_func = self.loss_criterion()
-        accumulated_rewards = np.zeros(self.num_objectives)
         episode_nr = 0
         num_of_conducted_optimisation_steps = 0
         #take step in environment
@@ -121,8 +132,6 @@ class MO_DQN:
                 self.truncated,
                 info,
             ) = self.env.step(self.action)
-            #accumulate episode reward
-            accumulated_rewards = accumulated_rewards + self.reward
 
             #cast return values to gpu tensor before storing them in replay buffer
             self.next_obs = torch.tensor(self.next_obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
@@ -136,23 +145,35 @@ class MO_DQN:
             self.obs = self.next_obs #use next_obs as obs during the next iteration
             #update the weights every optimisation_frequency steps
             if (i % inv_optimisation_frequency) == 0:
-                #Test TODO: remove this line. It is use for testing whether it is better to only start optimising once the buffer is full
                 if self.buffer.num_elements == self.rb_size:
-                    self.__update_weights(num_of_conducted_optimisation_steps, inv_target_update_frequency)
+                    self.__update_weights(i, num_of_conducted_optimisation_steps, inv_target_update_frequency)
                     num_of_conducted_optimisation_steps += 1
 
-            if self.terminated or self.truncated:
-                self.reward_logger.add(episode_nr, *list(accumulated_rewards))
+            #run evaluation
+            if (num_evaluations != 0) and (i % eval_interval == 0):
+                _, hv = self.evaluate(num_repetitions= 5, num_points= 10, hv_reference_point=np.array([0,0]),
+                                        seed = eval_seed)
+                hv_logger.add(iteration=i, hypervolume=hv)
 
-                accumulated_rewards = np.zeros(self.num_objectives)
+            if self.terminated or self.truncated:
                 episode_nr += 1
                 self.obs, _ = self.env.reset()
                 self.obs = torch.tensor(self.obs[0].reshape(1,-1), device=self.device) #TODO: remove when going to multi-agent
                 self.objective_weights = random_objective_weights(self.num_objectives, self.rng, self.device)
+        
+        #prepare logger data
+        df = self.loss_logger.to_dataframe()
+        leading_nans = pd.DataFrame(data = np.full(shape=(df["iteration"].min(), len(df.columns)), fill_value=np.nan),columns=df.columns)
+        df = pd.concat([leading_nans, df], ignore_index=True)
+        #add hypervolume information if applicable
+        if num_evaluations != 0:
+            hv_df = hv_logger.to_dataframe()
+            df["hypervolume"] = np.nan
+            df.loc[df.index.isin(hv_df["iteration"]),"hypervolume"] = hv_df["hypervolume"].to_numpy()
 
-        return self.reward_logger.to_dataframe()
+        return df
 
-    def __update_weights(self, current_optimisation_iteration, inv_target_update_frequency):
+    def __update_weights(self, current_iteration, current_optimisation_iteration, inv_target_update_frequency):
         #update normal network each time the function is called
         #update target network every k steps
 
@@ -178,6 +199,8 @@ class MO_DQN:
         exp_state_action_values = next_state_values * self.gamma + rewards
         #compute loss between estimates and actual values
         loss = self.loss_func(state_action_values, exp_state_action_values)
+        #add loss to logger
+        self.loss_logger.add(iteration=current_iteration, loss=loss.item())
         #backpropagate loss
         self.optimiser.zero_grad()
         loss.backward()
@@ -219,7 +242,7 @@ class MO_DQN:
             to obtain a less biased result.
             The hv_reference_point is a vector specifying the best possible vectorial reward vector."""
         
-        self.eval_env = self.env
+        self.eval_env = deepcopy(self.env) #TODO: test whether deepcopy works
         if episode_recording_interval is not None:
             self.eval_env = RecordVideoV0(self.env, video_folder="videos", name_prefix="training_MODQN", 
                                                 episode_trigger=lambda x: x % episode_recording_interval == 0, fps=30)
@@ -269,7 +292,16 @@ class MO_DQN:
                 #episode ended
                 normalised_reward = accumulated_reward / curr_num_iterations
                 eval_logger.add(repetition_nr, tuple_index, weight_tuple.tolist(), curr_num_iterations, *normalised_reward.tolist(), *accumulated_reward.tolist())
-                
+        
+        #compute hypervolume if reference point is given
+        if hv_reference_point is not None:
+            df = eval_logger.to_dataframe()
+            mean_df = df.groupby("weight_index")[["normalised_speed_reward", "normalised_energy_reward"]].mean()
+            reward_vector = mean_df.to_numpy()
+            hypervolume = calc_hypervolume(hv_reference_point, reward_vector)
+            return df, hypervolume
+        
+        #otherwise only return the eval logger dataframe
         return eval_logger.to_dataframe()
 
     def reduce_epsilon(self, max_iteration, eps_start, eps_end):
