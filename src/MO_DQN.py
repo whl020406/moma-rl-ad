@@ -27,7 +27,7 @@ class MO_DQN:
         replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, objective_weights: Sequence[float] = None,
         loss_criterion: _Loss = nn.SmoothL1Loss, gamma: float = 0.99,
         objective_names: List[str] = None, scalarisation_method = LinearScalarisation, scalarisation_argument_list: List = [],
-        use_reward_normalisation_wrapper: bool = True) -> None:
+        use_reward_normalisation_wrapper: bool = True, use_default_reward_normalisation: bool = True) -> None:
         
         self.gamma = gamma
 
@@ -38,7 +38,10 @@ class MO_DQN:
         self.objective_names = objective_names
 
         self.use_reward_normalisation_wrapper = use_reward_normalisation_wrapper
+        self.use_default_reward_normalisation = use_default_reward_normalisation
+
         #applies reward normalisation wrapper to all objectives
+        env.unwrapped.configure({"normalize_reward": use_default_reward_normalisation})
         if use_reward_normalisation_wrapper:
             for i in range(num_objectives):
                 env = MONormalizeReward(env, idx=i, gamma=self.gamma)
@@ -256,8 +259,9 @@ class MO_DQN:
                     info,
                     ) = self.eval_env.step(self.action)
                     
-                    #if reward normalisation wrapper is utilised, take raw rewards from info dict
-                    if self.use_reward_normalisation_wrapper:
+                    #if reward normalisation wrapper is utilised or default normalisation wasn't applied,
+                    #take default normalised rewards from info dict
+                    if self.use_reward_normalisation_wrapper or (not self.use_default_reward_normalisation):
                         self.reward = info["rewards"]
                     accumulated_reward = accumulated_reward + self.reward
                     curr_num_iterations += 1

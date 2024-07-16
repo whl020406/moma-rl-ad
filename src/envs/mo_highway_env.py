@@ -50,26 +50,23 @@ class MOHighwayEnv(HighwayEnvFast):
         return config
 
     def _reward(self, action: Action) -> float:
-        
+
         rewards = self._rewards(action)
-        rewards = {
+        scalarised_rewards = {
             name: self.config.get(name, 0) * reward for name, reward in rewards.items()
         }
-        speed_reward = rewards["high_speed_reward"] + rewards["right_lane_reward"] + rewards["collision_reward"]
-        energy_reward = rewards["energy_consumption_reward"] + rewards["right_lane_reward"] + rewards["collision_reward"]
-        
+        speed_reward = scalarised_rewards["high_speed_reward"] + scalarised_rewards["right_lane_reward"]
+        energy_reward = scalarised_rewards["energy_consumption_reward"] + scalarised_rewards["right_lane_reward"]
+
+        #default normalisation
         if self.config["normalize_reward"]:
-            speed_reward = utils.lmap(speed_reward,
-                                [self.config["collision_reward"],
-                                    self.config["high_speed_reward"] + self.config["right_lane_reward"]],
-                                [0, 1])
-            energy_reward = utils.lmap(energy_reward,
-                                [self.config["collision_reward"],
-                                    self.config["energy_consumption_reward"] + self.config["right_lane_reward"]],
-                                [0, 1])
+            speed_reward, energy_reward = self.__normalize_rewards([speed_reward, energy_reward])
+        else:
+            self.raw_rewards = scalarised_rewards #store raw rewards for info function
+        
         if rewards["collision_reward"] != 0:
-           speed_reward = 0 #TODO: this is just for testing, set back to 0 after
-           energy_reward = 0 #TODO: this is just for testing, set back to 0 after
+           speed_reward = self.config["collision_reward"] #TODO: this is just for testing, set back to 0 after
+           energy_reward = self.config["collision_reward"] #TODO: this is just for testing, set back to 0 after
                    
         return np.array([speed_reward, energy_reward])
 
@@ -88,9 +85,25 @@ class MOHighwayEnv(HighwayEnvFast):
             "collision_reward": float(self.vehicle.crashed),
             "right_lane_reward": lane / max(len(neighbours) - 1, 1),
             "high_speed_reward": np.clip(scaled_speed, 0, 1),
-            "energy_consumption_reward": self.energy_consumption_function.compute_efficiency(self.vehicle, normalise=self.config["normalize_reward"])
+            "energy_consumption_reward": self.energy_consumption_function.compute_efficiency(self.vehicle, True)
         }
     
+    def __normalize_rewards(self, rewards):
+        speed_reward = rewards[0]
+        energy_reward = rewards[1]
+
+        speed_reward = utils.lmap(speed_reward,
+                                [0,
+                                    self.config["high_speed_reward"] + self.config["right_lane_reward"]],
+                                [0, 1])
+        
+        energy_reward = utils.lmap(energy_reward,
+                                [0,
+                                    self.config["energy_consumption_reward"] + self.config["right_lane_reward"]],
+                                [0, 1])
+        
+        return speed_reward, energy_reward
+
     def _create_vehicles(self) -> None:
         """Create some new random vehicles of a given type, and add them on the road."""
         other_vehicles_type = utils.class_from_path(self.config["other_vehicles_type"])
@@ -147,6 +160,9 @@ class MOHighwayEnv(HighwayEnvFast):
         }
         try:
             info["rewards"] = self._reward(action)
+            #if not normalised, report normalised rewards in info dict
+            if not self.config["normalize_reward"]:
+                info["rewards"] = self.__normalize_rewards(info["rewards"])
         except NotImplementedError:
             pass
         return info

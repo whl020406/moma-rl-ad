@@ -85,9 +85,9 @@ def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_path: 
     
     #run all experiments
     df_list = []
-    for env_config_id in tqdm(range(len(run_config["env"]["observation"])), desc="Environment", position=1, leave=False):
+    for env_config_id in tqdm(range(len(run_config["env"])), desc="Environment", position=1, leave=False):
         current_parameter_indices = np.zeros(len(run_config["init"]), dtype= int) #initialise current parameter indices to 0
-        current_env_config = {k:v[env_config_id] for k,v in run_config["env"].items()}
+        current_env_config = run_config["env"][env_config_id]# Old code: {k:v[env_config_id] for k,v in run_config["env"].items()}
         env.unwrapped.configure(current_env_config)
         for experiment_id in tqdm(range(num_of_experiments), desc="Experiments", position=2, leave=False):
             parameters = fetch_algorithm_parameters(run_config["init"], current_parameter_indices)

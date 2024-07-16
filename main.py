@@ -10,17 +10,24 @@ env.unwrapped.configure({
     "screen_width": 500,
     "fps": 20,
     "screen_height": 500,
-    "vehicles_count": 2,
+    "vehicles_count": 15,
     "controlled_vehicles": 1,
     "duration": 80,  # [s]
 
     "observation": {
         "type": "MultiAgentObservation",
         "observation_config": {
-            "type": "Kinematics",
-            "see_behind": False,
-            "normalize": False,
-            "features": ['presence', 'x', 'y', 'vx', 'vy']
+            "type": "OccupancyGrid",
+            "features": ["presence", "x", "y", "vx", "vy"],
+            "features_range": {
+                "x": [-100, 100],
+                "y": [-100, 100],
+                "vx": [-20, 20],
+                "vy": [-20, 20]
+            },
+            "grid_size": [[-27.5, 27.5], [-27.5, 27.5]],
+            "grid_step": [5, 5],
+            "align_to_vehicle_axes": True
         }
     },
 })
@@ -32,8 +39,8 @@ done = False
 truncated = False
 while True:
     #print(env.get_wrapper_attr('get_available_actions')())
-    obs, reward, done, truncated, info = env.step(env.action_space.sample())
-    print(obs[0])
+    obs, reward, done, truncated, info = env.step(1)
+    print(obs[0][0])
     env.render()
 
 plt.imshow(env.render())
