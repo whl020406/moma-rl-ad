@@ -143,6 +143,7 @@ class MO_DQN:
             #push to replay buffer
             self.buffer.push(self.obs, self.action, self.next_obs, self.reward, self.terminated)
             self.obs = self.next_obs #use next_obs as obs during the next iteration
+            
             #update the weights every optimisation_frequency steps
             if (i % inv_optimisation_frequency) == 0:
                 if self.buffer.num_elements == self.rb_size:

@@ -60,8 +60,8 @@ class MOMAHighwayEnv(HighwayEnvFast):
         
         num_close_vehicles = self.observation_type.agents_observation_types[0].vehicles_count
         reward_dict_lists = self._rewards(action)
-        #rows with -1 indicate missing close vehicle
-        reward_array = np.ones(shape=(len(reward_dict_lists),num_close_vehicles,2)) * (-1) #2 because we have two objectives
+        #rows with np.nan indicate missing close vehicle
+        reward_array = np.full(shape=(len(reward_dict_lists),num_close_vehicles,2), fill_value=np.nan) #2 because we have two objectives
         
         for i, dict_list in enumerate(reward_dict_lists):
             for j, reward_dict in enumerate(dict_list):

@@ -12,6 +12,9 @@ from typing import List
 from pymoo.util.ref_dirs import get_reference_directions
 from DQN_Network import DQN_Network
 from utils import AugmentedMultiAgentObservation
+import pandas as pd
+from copy import deepcopy
+from src.utils import calc_hypervolume
 
 class MOMA_DQN:
     """ 
@@ -87,7 +90,7 @@ class MOMA_DQN:
             return policy_net, target_net
 
     def train(self, num_episodes: int = 5_000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 5, 
-                gamma: float = 0.9, epsilon_start: float = 0.1, epsilon_end: float = 0) :
+                gamma: float = 0.9, epsilon_start: float = 0.1, epsilon_end: float = 0, num_evaluations: int = 0, eval_seed: int = 11) :
         '''
         Runs the training procedure for num_iterations iterations. The inv_optimisation_frequency specifies 
         the number of iterations after which a weight update occurs.The inv_target_update_frequency specifies 
@@ -95,6 +98,20 @@ class MOMA_DQN:
         Gamma is the discount factor for the rewards. Epsilon is the probability of a random action being selected during training.
         Its value is linearly reduced during the training procedure from epsilon_start to epsilon_end.
         '''
+
+        #compute evaluation interval
+        if num_evaluations != 0:
+            eval_interval = round(num_episodes/num_evaluations)
+        
+        #initialise loss logger
+        feature_names = ["episode", "loss"]
+        self.loss_logger = DataLogger("loss_logger",feature_names)
+
+        #initialise hv_logger
+        feature_names = ["episode", "hypervolume"]
+        hv_logger = DataLogger("hv_logger", feature_names)
+
+
         self.obs, _ = self.env.reset()
         self.obs = [torch.tensor(single_obs, device=self.device) for single_obs in self.obs] #reshape observations and
         self.obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.obs] #remove nan values
@@ -122,10 +139,7 @@ class MOMA_DQN:
                 
                 self.crashed = info["crashed"]
                 self.vehicle_obj_weights = info["vehicle_objective_weights"]
-                #accumulate episode reward
-
-                #TODO: figure out what data to log: look at corresponding trello entry
-
+                
                 self.next_obs = [torch.tensor(single_obs, device=self.device) for single_obs in self.next_obs] #reshape observations and
                 self.next_obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.next_obs] #remove nan values
                 
@@ -136,11 +150,17 @@ class MOMA_DQN:
                 #use next_obs as obs during the next iteration
                 self.obs = self.next_obs
 
-                #update the weights every optimisation_frequency steps and only once the replay buffer is filled
-                if ((episode_nr % inv_optimisation_frequency) == 0) and (self.buffer.num_elements == self.rb_size):
+            #update the weights every optimisation_frequency steps and only once the replay buffer is filled
+            if ((episode_nr % inv_optimisation_frequency) == 0) and (self.buffer.num_elements == self.rb_size):
 
-                    self.__update_weights(num_of_conducted_optimisation_steps, inv_target_update_frequency)
-                    num_of_conducted_optimisation_steps += 1
+                self.__update_weights(episode_nr, num_of_conducted_optimisation_steps, inv_target_update_frequency)
+                num_of_conducted_optimisation_steps += 1
+                
+            #run evaluation
+            if (num_evaluations != 0) and (episode_nr % eval_interval == 0):
+                _, hv = self.evaluate(num_repetitions= 5, num_points= 10, hv_reference_point=np.array([0,0]),
+                                        seed = eval_seed)
+                hv_logger.add(episode=episode_nr, hypervolume=hv)
 
             #reset environment if it was terminated
             if self.terminated or self.truncated:
@@ -153,10 +173,19 @@ class MOMA_DQN:
                 self.obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.obs] #remove nan values
                 self.objective_weights = random_objective_weights(self.num_objectives, self.rng, self.device)
 
-        return self.reward_logger.to_dataframe()
+        #prepare logger data
+        df = self.loss_logger.to_dataframe()
+        leading_nans = pd.DataFrame(data = np.full(shape=(df["episode"].min(), len(df.columns)), fill_value=np.nan),columns=df.columns)
+        df = pd.concat([leading_nans, df], ignore_index=True)
+        #add hypervolume information if applicable
+        if num_evaluations != 0:
+            hv_df = hv_logger.to_dataframe()
+            df["hypervolume"] = np.nan
+            df.loc[df.index.isin(hv_df["episode"]),"hypervolume"] = hv_df["hypervolume"].to_numpy()
 
+        return df
+    
     def compute_reward_summary(self, rewards, obj_weights):
-        #TODO: debug shape mismatch
         reward_summary = []
 
         for i in range(self.num_controlled_vehicles):
@@ -167,7 +196,9 @@ class MOMA_DQN:
             #this can happen when one of the next vehicle is far away from ego
             #thus we need to bring it to the same shape
             if r.shape[0] > weights.shape[0]:
-                assert torch.all(r[weights.shape[0]+1:] == -1) #make sure all rewards beyond this point are -1
+                if not torch.isnan(r[weights.shape[0]:]).all(): #make sure all rewards beyond this point are nan
+                    print(r[weights.shape[0]:])
+                assert torch.isnan(r[weights.shape[0]:]).all() #make sure all rewards beyond this point are nan
                 r = r[:weights.shape[0]] #remove all excess rows from r
             
             weighted_reward = r * weights
@@ -184,9 +215,7 @@ class MOMA_DQN:
         return reward_summary
             
 
-    def __update_weights(self, current_optimisation_iteration, inv_target_update_frequency):
-        #TODO: adjust to work in MOMA setting
-
+    def __update_weights(self, current_iteration, current_optimisation_iteration, inv_target_update_frequency):
         #fetch samples from replay buffer
         batch_samples = self.buffer.sample(round(self.buffer.num_elements*self.batch_ratio))
         observations = self.buffer.get_observations(batch_samples)
@@ -217,6 +246,9 @@ class MOMA_DQN:
 
         #compute loss between estimates and actual values
         loss = self.loss_func(state_action_values, exp_state_action_values)
+        #store loss in loss logger
+        self.loss_logger.add(episode=current_iteration, loss=loss.item())
+
         #backpropagate loss
         self.optimiser.zero_grad()
         loss.backward()
@@ -260,6 +292,7 @@ class MOMA_DQN:
             to obtain a less biased result.
             The hv_reference_point is a vector specifying the best possible vectorial reward vector."""
         
+        self.eval_env = deepcopy(self.env) #TODO: test whether deepcopy works
         self.eval_env = self.env
         if episode_recording_interval is not None:
             self.eval_env = RecordVideoV0(self.env, video_folder="videos", name_prefix="training_MODQN", 
@@ -309,7 +342,7 @@ class MOMA_DQN:
                     for vehicle_id in range(self.num_controlled_vehicles):
                         #select only the rewards for a specific controlled vehicle
                         vehicle_rewards = self.reward[vehicle_id]
-                        valid_reward_indices = ~np.all(vehicle_rewards == -1, axis=1)
+                        valid_reward_indices = ~np.all(vehicle_rewards == np.nan, axis=1)
                         vehicle_rewards = vehicle_rewards[valid_reward_indices]
 
                         #compute rewards and add them to the accumulated reward array
@@ -322,7 +355,16 @@ class MOMA_DQN:
                 normalised_reward = accumulated_reward / curr_num_iterations
                 for vehicle_id in range(self.num_controlled_vehicles):
                     eval_logger.add(repetition_nr, tuple_index, weight_tuple.tolist(), curr_num_iterations, vehicle_id, *normalised_reward[vehicle_id].tolist(), *accumulated_reward[vehicle_id].tolist())
-                
+        
+
+        #compute hypervolume if reference point is given
+        if hv_reference_point is not None:
+            df = eval_logger.to_dataframe()
+            mean_df = df.groupby("weight_index")[["normalised_speed_reward", "normalised_energy_reward"]].mean()
+            reward_vector = mean_df.to_numpy()
+            hypervolume = calc_hypervolume(hv_reference_point, reward_vector)
+            return df, hypervolume
+
         return eval_logger.to_dataframe()
 
     def reduce_epsilon(self, max_iteration, eps_start, eps_end):
