@@ -187,6 +187,7 @@ class MOMA_DQN:
     
     def compute_reward_summary(self, rewards, obj_weights):
         reward_summary = []
+        self.num_close_vehicles = rewards[0].shape[0]
 
         for i in range(self.num_controlled_vehicles):
             r = torch.from_numpy(rewards[i]).to(self.device)
@@ -235,14 +236,18 @@ class MOMA_DQN:
         
         with torch.no_grad():
             next_state_values = self.target_net(next_obs).max(2).values
-        next_state_values[term_flags] = 0
+        next_state_values[term_flags] = 0 #set to 0 in case of a crash
 
         ego_rewards = rewards[:,0:self.num_objectives]
         mean_social_rewards = rewards[:,self.num_objectives:]
 
         #uses ego and mean social rewards
+        #exp_state_action_values = next_state_values * self.gamma + \
+        #(ego_rewards * self.ego_reward_priority + mean_social_rewards * (1-self.ego_reward_priority))
+
+        #uses mean reward
         exp_state_action_values = next_state_values * self.gamma + \
-        (ego_rewards * self.ego_reward_priority + mean_social_rewards * (1-self.ego_reward_priority))
+        (ego_rewards + mean_social_rewards*self.num_close_vehicles) / self.num_close_vehicles+1
 
         #compute loss between estimates and actual values
         loss = self.loss_func(state_action_values, exp_state_action_values)

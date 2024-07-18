@@ -16,9 +16,6 @@ from copy import deepcopy
 from src.utils import calc_hypervolume
 import pandas as pd
 
-
-
-
 class MO_DQN:
     """ 
     Implements multi-objective DQN working with one agent. Code is based on:
@@ -30,7 +27,8 @@ class MO_DQN:
         replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, objective_weights: Sequence[float] = None,
         loss_criterion: _Loss = nn.SmoothL1Loss, gamma: float = 0.99,
         objective_names: List[str] = None, scalarisation_method = LinearScalarisation, scalarisation_argument_list: List = [],
-        use_reward_normalisation_wrapper: bool = True, use_default_reward_normalisation: bool = True) -> None:
+        use_reward_normalisation_wrapper: bool = False, use_default_reward_normalisation: bool = True,
+        network_hidden_sizes: List[int] = None) -> None:
         
         self.gamma = gamma
 
@@ -67,7 +65,7 @@ class MO_DQN:
         self.observation_space_shape = observation_space_shape
 
         (self.policy_net, self.target_net) = \
-        self.__create_network(np.cumprod(observation_space_shape)[-1], self.num_actions, self.num_objectives)
+        self.__create_network(np.cumprod(observation_space_shape)[-1], self.num_actions, self.num_objectives, network_hidden_sizes)
 
         self.replay_enabled = replay_enabled
         self.rb_size = replay_buffer_size
@@ -82,10 +80,15 @@ class MO_DQN:
         self.scalarisation_method = scalarisation_method(*scalarisation_argument_list)
 
 
-    def __create_network(self, num_observations, num_actions, num_objectives) -> Tuple[nn.Module, nn.Module]:
+    def __create_network(self, num_observations, num_actions, num_objectives, network_hidden_sizes) -> Tuple[nn.Module, nn.Module]:
         #create one network for each objective
-        policy_net = DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
-        target_net = DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
+        if network_hidden_sizes is not None:
+            policy_net = DQN_Network(num_observations, num_actions, num_objectives, network_hidden_sizes).to(self.device)
+            target_net = DQN_Network(num_observations, num_actions, num_objectives, network_hidden_sizes).to(self.device)
+        else:
+            policy_net = DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
+            target_net = DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
+
         target_net.load_state_dict(policy_net.state_dict())
 
         return policy_net, target_net
@@ -118,7 +121,7 @@ class MO_DQN:
         self.epsilon = epsilon_start
         self.optimiser = torch.optim.AdamW(self.policy_net.parameters(), lr=1e-3, amsgrad=True)
 
-        self.loss_func = self.loss_criterion()
+        self.loss_func = self.loss_criterion(reduction="mean")
         episode_nr = 0
         num_of_conducted_optimisation_steps = 0
         #take step in environment
@@ -253,12 +256,21 @@ class MO_DQN:
         objective_weights = get_reference_directions("energy", n_dim = self.num_objectives, n_points = num_points, seed=seed)
         objective_weights = torch.from_numpy(objective_weights).to(self.device)
         
+
+        #instantiate data loggers
+        #for summary information
         feature_names = ["repetition_number", "weight_index","weight_tuple", "num_iterations"]
         feature_names.extend([f"normalised_{x}" for x in self.objective_names])
         feature_names.extend([f"raw_{x}" for x in self.objective_names])
         eval_logger = DataLogger("evaluation_logger",feature_names)
+
+        #for more detailed information on the individual vehicles
+        #target and actual speeds are only useful for uncontrolled vehicles, while weights are only applicable to controlled vehicles
+        feature_names = ["repetition_number", "weight_index", "weight_tuple", "iteration", "vehicle_id", "controlled_flag", "action", "target_speed", "curr_speed", "acc", "lane"]
+        feature_names.extend([f"curr_{x}" for x in self.objective_names])
+        vehicle_logger = DataLogger("vehicle_logger", feature_names)
         
-        for tuple_index in trange(objective_weights.shape[0], desc="Weight tuple", mininterval=1):#
+        for tuple_index in trange(objective_weights.shape[0], desc="Weight tuple", mininterval=1):
             weight_tuple = objective_weights[tuple_index]
             self.objective_weights = weight_tuple
             
@@ -287,6 +299,20 @@ class MO_DQN:
                     #take default normalised rewards from info dict
                     if self.use_reward_normalisation_wrapper or (not self.use_default_reward_normalisation):
                         self.reward = info["rewards"]
+
+                    #populate vehicle logger
+                    for v_id, vehicle in enumerate(self.eval_env.road.vehicles):
+                        action = np.nan
+                        lane = vehicle.lane_index[2]
+                        acc = vehicle.action["acceleration"]
+                        reward = np.full(self.num_objectives, fill_value=np.nan)
+                        if vehicle.is_controlled:
+                            action = self.action
+                            reward = self.reward
+                        vehicle_logger.add(repetition_nr, tuple_index, weight_tuple.tolist(), curr_num_iterations, 
+                                           v_id, vehicle.is_controlled, action, vehicle.target_speed, vehicle.speed, 
+                                           acc, lane, *reward.tolist())
+                        
                     accumulated_reward = accumulated_reward + self.reward
                     curr_num_iterations += 1
 
@@ -300,10 +326,10 @@ class MO_DQN:
             mean_df = df.groupby("weight_index")[["normalised_speed_reward", "normalised_energy_reward"]].mean()
             reward_vector = mean_df.to_numpy()
             hypervolume = calc_hypervolume(hv_reference_point, reward_vector)
-            return df, hypervolume
+            return df, vehicle_logger.to_dataframe(), hypervolume
         
         #otherwise only return the eval logger dataframe
-        return eval_logger.to_dataframe()
+        return eval_logger.to_dataframe(), vehicle_logger.to_dataframe()
 
     def reduce_epsilon(self, max_iteration, eps_start, eps_end):
         self.epsilon = self.epsilon - (eps_start-eps_end)/max_iteration

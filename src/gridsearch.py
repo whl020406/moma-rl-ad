@@ -64,8 +64,11 @@ def add_metadata(df: pd.DataFrame, parameters, env_config_id):
     df["env_config_id"] = env_config_id
 
     for parameter_name, value in parameters.items():
-        df[parameter_name] = value
-    
+        #tries setting the value, if that doesn't work, changes the datatype of the column to "object" and tries again
+        try:
+            df[parameter_name] = value
+        except:
+            df[parameter_name] = pd.Series([value] * len(df))
     return df
 
 def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_path: str = "data/", experiment_name: str = "experiment"):
