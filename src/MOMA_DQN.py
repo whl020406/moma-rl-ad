@@ -298,7 +298,6 @@ class MOMA_DQN:
             The hv_reference_point is a vector specifying the best possible vectorial reward vector."""
         
         self.eval_env = deepcopy(self.env) #TODO: test whether deepcopy works
-        self.eval_env = self.env
         if episode_recording_interval is not None:
             self.eval_env = RecordVideoV0(self.env, video_folder="videos", name_prefix="training_MODQN", 
                                                 episode_trigger=lambda x: x % episode_recording_interval == 0, fps=30)
@@ -308,10 +307,18 @@ class MOMA_DQN:
         objective_weights = get_reference_directions("energy", n_dim = self.num_objectives, n_points = num_points, seed=seed)
         objective_weights = torch.from_numpy(objective_weights).to(self.device)
         
+        #instantiate data loggers
+        #for summary information
         feature_names = ["repetition_number", "weight_index","weight_tuple", "num_iterations", "vehicle_id"]
         feature_names.extend([f"normalised_{x}" for x in self.objective_names])
         feature_names.extend([f"raw_{x}" for x in self.objective_names])
         eval_logger = DataLogger("evaluation_logger",feature_names)
+
+        #for more detailed information on the individual vehicles
+        #target and actual speeds are only useful for uncontrolled vehicles, while weights are only applicable to controlled vehicles
+        feature_names = ["repetition_number", "weight_index", "weight_tuple", "iteration", "vehicle_id", "controlled_flag", "action", "target_speed", "curr_speed", "acc", "lane"]
+        feature_names.extend([f"curr_{x}" for x in self.objective_names])
+        vehicle_logger = DataLogger("vehicle_logger", feature_names)
         
         for tuple_index in trange(objective_weights.shape[0], desc="Weight tuple", mininterval=1):#
             weight_tuple = objective_weights[tuple_index]
@@ -344,6 +351,7 @@ class MOMA_DQN:
                     info,
                     ) = self.eval_env.step(self.action)
                     
+                    #accumulate rewards for summary logger
                     for vehicle_id in range(self.num_controlled_vehicles):
                         #select only the rewards for a specific controlled vehicle
                         vehicle_rewards = self.reward[vehicle_id]
@@ -353,6 +361,22 @@ class MOMA_DQN:
                         #compute rewards and add them to the accumulated reward array
                         vehicle_rewards =  np.sum(vehicle_rewards, axis=0) / vehicle_rewards.shape[0]
                         accumulated_reward[vehicle_id] += vehicle_rewards
+                    
+
+                    #populate vehicle logger
+                    controlled_vehicles_count = 0
+                    for vehicle_id, vehicle in enumerate(self.eval_env.road.vehicles):
+                        action = np.nan
+                        lane = vehicle.lane_index[2]
+                        acc = vehicle.action["acceleration"]
+                        reward = np.full(self.num_objectives, fill_value=np.nan)
+                        if vehicle.is_controlled:
+                            action = self.action[controlled_vehicles_count]
+                            reward = self.reward[controlled_vehicles_count][0]
+                            controlled_vehicles_count += 1
+                        vehicle_logger.add(repetition_nr, tuple_index, weight_tuple.tolist(), curr_num_iterations, 
+                                           vehicle_id, vehicle.is_controlled, action, vehicle.target_speed, vehicle.speed, 
+                                           acc, lane, *reward.tolist())
 
                     curr_num_iterations += 1
 
@@ -368,9 +392,9 @@ class MOMA_DQN:
             mean_df = df.groupby("weight_index")[["normalised_speed_reward", "normalised_energy_reward"]].mean()
             reward_vector = mean_df.to_numpy()
             hypervolume = calc_hypervolume(hv_reference_point, reward_vector)
-            return df, hypervolume
+            return df, vehicle_logger.to_dataframe(), hypervolume
 
-        return eval_logger.to_dataframe()
+        return eval_logger.to_dataframe(), vehicle_logger.to_dataframe()
 
     def reduce_epsilon(self, max_iteration, eps_start, eps_end):
         self.epsilon = self.epsilon - (eps_start-eps_end)/max_iteration
