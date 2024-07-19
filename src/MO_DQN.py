@@ -28,7 +28,7 @@ class MO_DQN:
         loss_criterion: _Loss = nn.SmoothL1Loss, gamma: float = 0.99,
         objective_names: List[str] = None, scalarisation_method = LinearScalarisation, scalarisation_argument_list: List = [],
         use_reward_normalisation_wrapper: bool = False, use_default_reward_normalisation: bool = True,
-        network_hidden_sizes: List[int] = None) -> None:
+        network_hidden_sizes: List[int] = None, use_double_q_learning: bool = True) -> None:
         
         self.gamma = gamma
 
@@ -40,6 +40,7 @@ class MO_DQN:
 
         self.use_reward_normalisation_wrapper = use_reward_normalisation_wrapper
         self.use_default_reward_normalisation = use_default_reward_normalisation
+        self.use_double_q_learning = use_double_q_learning
 
         #applies reward normalisation wrapper to all objectives
         env.unwrapped.configure({"normalize_reward": use_default_reward_normalisation})
@@ -199,9 +200,16 @@ class MO_DQN:
         state_action_values = state_action_values.reshape(observations.shape[0],self.num_objectives)
         
         with torch.no_grad():
-            next_state_values = self.target_net(next_obs).max(2).values
+            #code taken from https://github.com/eleurent/rl-agents/blob/master/rl_agents/agents/deep_q_network/pytorch.py
+            if self.use_double_q_learning:
+                best_actions_policy_net = self.policy_net(next_obs).argmax(2).unsqueeze(2)
+                target_net_estimate = self.target_net(next_obs)
+                next_state_values = target_net_estimate.gather(2, best_actions_policy_net).squeeze(2)
+            else:
+                next_state_values = self.target_net(next_obs).max(2).values
+
         next_state_values[term_flags] = 0
-            
+
         exp_state_action_values = next_state_values * self.gamma + rewards
         #compute loss between estimates and actual values
         loss = self.loss_func(state_action_values, exp_state_action_values)
