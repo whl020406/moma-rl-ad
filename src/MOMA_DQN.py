@@ -30,7 +30,7 @@ class MOMA_DQN:
         objective_weights: Sequence[float] = None, loss_criterion: _Loss = nn.SmoothL1Loss, 
         objective_names: List[str] = None, scalarisation_method = LinearScalarisation, 
         scalarisation_argument_list: List = [],ego_reward_priority: float = 0.5, 
-        reward_structure: str = "mean_reward") -> None:
+        reward_structure: str = "mean_reward", use_double_q_learning: bool = True) -> None:
         
         if objective_names is None:
             objective_names = [f"reward_{x}" for x in range(num_objectives)]
@@ -41,7 +41,7 @@ class MOMA_DQN:
         self.reward_structure = reward_structure
         self.env = env
         self.num_controlled_vehicles = len(self.env.unwrapped.controlled_vehicles)
-            
+        self.use_double_q_learning = use_double_q_learning
         self.rng = np.random.default_rng(seed)
         torch.manual_seed(seed)
 
@@ -239,9 +239,16 @@ class MOMA_DQN:
         state_action_values = self.policy_net(observations)
         state_action_values = state_action_values.gather(2, actions)
         state_action_values = state_action_values.reshape(observations.shape[0],self.num_objectives)
-        
+
         with torch.no_grad():
-            next_state_values = self.target_net(next_obs).max(2).values
+            #code taken from https://github.com/eleurent/rl-agents/blob/master/rl_agents/agents/deep_q_network/pytorch.py
+            if self.use_double_q_learning:
+                best_actions_policy_net = self.policy_net(next_obs).argmax(2).unsqueeze(2)
+                target_net_estimate = self.target_net(next_obs)
+                next_state_values = target_net_estimate.gather(2, best_actions_policy_net).squeeze(2)
+            else:
+                next_state_values = self.target_net(next_obs).max(2).values
+
         next_state_values[term_flags] = 0 #set to 0 in case of a crash
 
         exp_state_action_values = next_state_values * self.gamma + rewards
