@@ -30,7 +30,7 @@ class MOMA_DQN:
         objective_weights: Sequence[float] = None, loss_criterion: _Loss = nn.SmoothL1Loss, 
         objective_names: List[str] = None, scalarisation_method = LinearScalarisation, 
         scalarisation_argument_list: List = [],ego_reward_priority: float = 0.5, 
-        separate_ego_and_social_reward: bool = True) -> None:
+        reward_structure: str = "mean_reward") -> None:
         
         if objective_names is None:
             objective_names = [f"reward_{x}" for x in range(num_objectives)]
@@ -38,7 +38,7 @@ class MOMA_DQN:
         assert len(objective_names) == num_objectives, "The number of elements in the objective_names list must be equal to the number of objectives!"
         self.objective_names = objective_names
         self.ego_reward_priority = ego_reward_priority
-        self.separate_ego_and_social_reward = separate_ego_and_social_reward
+        self.reward_structure = reward_structure
         self.env = env
         self.num_controlled_vehicles = len(self.env.unwrapped.controlled_vehicles)
             
@@ -69,8 +69,7 @@ class MOMA_DQN:
         self.loss_criterion = loss_criterion
 
         #initialise replay buffer
-        #*2 for num_objectives because we want to store the rewards of the ego vehicle and the mean reward of close vehicles separately
-        self.buffer = ReplayBuffer(self.rb_size, self.observation_space_length, self.num_objectives*2, self.device, self.rng, importance_sampling=True)
+        self.buffer = ReplayBuffer(self.rb_size, self.observation_space_length, self.num_objectives, self.device, self.rng, importance_sampling=True)
 
         #initialise reward logger
         feature_names = ["episode"]
@@ -90,7 +89,7 @@ class MOMA_DQN:
             return policy_net, target_net
 
     def train(self, num_episodes: int = 5_000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 5, 
-                gamma: float = 0.9, epsilon_start: float = 0.1, epsilon_end: float = 0, num_evaluations: int = 0, eval_seed: int = 11) :
+                gamma: float = 0.9, epsilon_start: float = 0.9, epsilon_end: float = 0, epsilon_end_time: float = 1, num_evaluations: int = 0, eval_seed: int = 11) :
         '''
         Runs the training procedure for num_iterations iterations. The inv_optimisation_frequency specifies 
         the number of iterations after which a weight update occurs.The inv_target_update_frequency specifies 
@@ -111,22 +110,30 @@ class MOMA_DQN:
         feature_names = ["episode", "hypervolume"]
         hv_logger = DataLogger("hv_logger", feature_names)
 
-
-        self.obs, _ = self.env.reset()
-        self.obs = [torch.tensor(single_obs, device=self.device) for single_obs in self.obs] #reshape observations and
-        self.obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.obs] #remove nan values
         self.gamma = gamma
         self.epsilon = epsilon_start
         self.optimiser = torch.optim.AdamW(self.policy_net.parameters(), lr=1e-4, amsgrad=True)
 
         self.loss_func = self.loss_criterion()
-        accumulated_rewards = np.zeros(self.num_objectives)
         episode_nr = 0
         num_of_conducted_optimisation_steps = 0
-        #take step in environment
+        max_eps_iteration = round(num_episodes * epsilon_end_time)
+
+        #training loop
         for episode_nr in trange(num_episodes, desc="Training episodes", mininterval=2):
+            #reset environment
             self.terminated = False
             self.truncated = False
+            self.obs, _ = self.env.reset()
+            self.obs = [torch.tensor(single_obs, device=self.device) for single_obs in self.obs] #reshape observations and
+            self.obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.obs] #remove nan values
+            accumulated_rewards = np.zeros(self.num_objectives)
+
+            # currently every controlled vehicle has the same objective weights
+            self.objective_weights = random_objective_weights(self.num_objectives, self.rng, self.device)
+            for v in self.env.unwrapped.controlled_vehicles:
+                v.objective_weights = self.objective_weights     
+
             while not (self.terminated or self.truncated):
                 self.actions = self.act(self.obs, eps_greedy=True)
                 (
@@ -138,12 +145,12 @@ class MOMA_DQN:
                 ) = self.env.step(self.actions)
                 
                 self.crashed = info["crashed"]
-                self.vehicle_obj_weights = info["vehicle_objective_weights"]
+                vehicle_obj_weights = info["vehicle_objective_weights"]
                 
                 self.next_obs = [torch.tensor(single_obs, device=self.device) for single_obs in self.next_obs] #reshape observations and
                 self.next_obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.next_obs] #remove nan values
                 
-                reward_summary = self.compute_reward_summary(self.rewards, self.vehicle_obj_weights)
+                reward_summary = self.compute_reward_summary(self.rewards, vehicle_obj_weights)
 
                 self.buffer.push(self.obs, self.actions, self.next_obs, reward_summary, self.crashed, episode_nr, num_samples=self.num_controlled_vehicles)
                 
@@ -162,21 +169,15 @@ class MOMA_DQN:
                                         seed = eval_seed)
                 hv_logger.add(episode=episode_nr, hypervolume=hv)
 
-            #reset environment if it was terminated
-            if self.terminated or self.truncated:
-                self.reduce_epsilon(num_episodes, epsilon_start, epsilon_end) #linearly reduce the value of epsilon
-                self.reward_logger.add(episode_nr, *list(accumulated_rewards))
-
-                accumulated_rewards = np.zeros(self.num_objectives)
-                self.obs, _ = self.env.reset()
-                self.obs = [torch.tensor(single_obs, device=self.device) for single_obs in self.obs] #reshape observations and
-                self.obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.obs] #remove nan values
-                self.objective_weights = random_objective_weights(self.num_objectives, self.rng, self.device)
+            #update logger, reduce epsilon
+            self.reduce_epsilon(max_eps_iteration, epsilon_start, epsilon_end) #linearly reduce the value of epsilon
+            self.reward_logger.add(episode_nr, *list(accumulated_rewards))
 
         #prepare logger data
         df = self.loss_logger.to_dataframe()
         leading_nans = pd.DataFrame(data = np.full(shape=(df["episode"].min(), len(df.columns)), fill_value=np.nan),columns=df.columns)
         df = pd.concat([leading_nans, df], ignore_index=True)
+
         #add hypervolume information if applicable
         if num_evaluations != 0:
             hv_df = hv_logger.to_dataframe()
@@ -189,29 +190,38 @@ class MOMA_DQN:
         reward_summary = []
         self.num_close_vehicles = rewards[0].shape[0]
 
+        #iterate over each controlled vehicle
         for i in range(self.num_controlled_vehicles):
-            r = torch.from_numpy(rewards[i]).to(self.device)
-            weights = torch.stack(obj_weights[i], dim=0).to(self.device)
-            weights[torch.all(weights == 0, dim=1)] = 1 #where vehicles are not controlled --> add raw rewards
+            r = torch.from_numpy(rewards[i]).to(self.device) #fetch associated rewards
+
+            #in case of a crash, use crash penalty
+            if self.crashed[i]:
+                reward_summary.append(r[0]) #ego penalty for crash
+                continue
+
+            weights = torch.stack(obj_weights[i], dim=0).to(self.device) #fetch associated weights
+            weights[torch.all(weights == 0, dim=1)] = 1/self.num_objectives #where vehicles are not controlled, assume equal weights
             
-            #this can happen when one of the next vehicle is far away from ego
-            #thus we need to bring it to the same shape
+            #when some of the closest vehicles are too far away from ego, they are not included in the weights
+            #thus we need to bring the rewards tensor to the same shape as the weights tensor
             if r.shape[0] > weights.shape[0]:
-                if not torch.isnan(r[weights.shape[0]:]).all(): #make sure all rewards beyond this point are nan
-                    print(r[weights.shape[0]:])
                 assert torch.isnan(r[weights.shape[0]:]).all() #make sure all rewards beyond this point are nan
                 r = r[:weights.shape[0]] #remove all excess rows from r
             
             weighted_reward = r * weights
-            ego_reward = weighted_reward[0,:]
-            if weighted_reward.shape[0] > 1:
-                social_reward = weighted_reward[1:,:]
-                mean_social_reward = torch.sum(social_reward,dim=0) / (social_reward.shape[0]) #-1 to exclude the ego vehicle
-            else:
-                mean_social_reward = torch.tensor([0,0], device=self.device) #when no other vehicles are around the ego vehicle
-            #this means, in replay buffer, the first num_objectives elements in the reward are the ego reward 
-            #and the other two are the mean social reward
-            reward_summary.append(torch.hstack([ego_reward, mean_social_reward]))
+
+            #summarise the list of rewards to a single reward value using the specified reward structure
+            summary = None
+            match self.reward_structure:
+                case "mean_reward":
+                    summary = torch.mean(weighted_reward, dim=0) #mean of ego and social rewards
+                case "ego_reward":
+                    summary = weighted_reward[0,:] #only select reward of ego vehicle
+                case _:
+                    raise ValueError('reward_structure argument not in list of available reward structures')
+            
+            
+            reward_summary.append(summary)
         
         return reward_summary
             
@@ -224,12 +234,8 @@ class MOMA_DQN:
         actions = self.buffer.get_actions(batch_samples)
         term_flags = self.buffer.get_termination_flag(batch_samples)
         rewards  = self.buffer.get_rewards(batch_samples)
-        #go through each sample of the batch
-        #fetch Q values of the current observation and action from all the objectives Q-networks
-        
-        if self.separate_ego_and_social_reward:
-            actions = actions[:,0:self.num_objectives,:]
 
+        #fetch Q values of the current observation and action from all the objectives Q-networks
         state_action_values = self.policy_net(observations)
         state_action_values = state_action_values.gather(2, actions)
         state_action_values = state_action_values.reshape(observations.shape[0],self.num_objectives)
@@ -238,16 +244,7 @@ class MOMA_DQN:
             next_state_values = self.target_net(next_obs).max(2).values
         next_state_values[term_flags] = 0 #set to 0 in case of a crash
 
-        ego_rewards = rewards[:,0:self.num_objectives]
-        mean_social_rewards = rewards[:,self.num_objectives:]
-
-        #uses ego and mean social rewards
-        #exp_state_action_values = next_state_values * self.gamma + \
-        #(ego_rewards * self.ego_reward_priority + mean_social_rewards * (1-self.ego_reward_priority))
-
-        #uses mean reward
-        exp_state_action_values = next_state_values * self.gamma + \
-        (ego_rewards + mean_social_rewards*self.num_close_vehicles) / self.num_close_vehicles+1
+        exp_state_action_values = next_state_values * self.gamma + rewards
 
         #compute loss between estimates and actual values
         loss = self.loss_func(state_action_values, exp_state_action_values)
@@ -299,7 +296,7 @@ class MOMA_DQN:
         
         self.eval_env = deepcopy(self.env) #TODO: test whether deepcopy works
         if episode_recording_interval is not None:
-            self.eval_env = RecordVideoV0(self.env, video_folder="videos", name_prefix="training_MODQN", 
+            self.eval_env = RecordVideoV0(self.eval_env, video_folder="videos", name_prefix="training_MODQN", 
                                                 episode_trigger=lambda x: x % episode_recording_interval == 0, fps=30)
         
         self.rng = np.random.default_rng(seed)
@@ -331,7 +328,7 @@ class MOMA_DQN:
                 # explicitly set objective weights in the environment object as well
                 # so that observations are correct
                 # currently every controlled vehicle has the same objective weights
-                for v in self.env.unwrapped.controlled_vehicles:
+                for v in self.eval_env.unwrapped.controlled_vehicles:
                     v.objective_weights = self.objective_weights           
                 accumulated_reward = np.zeros(shape=(self.num_controlled_vehicles, self.num_objectives))
                 curr_num_iterations = 0
@@ -353,19 +350,14 @@ class MOMA_DQN:
                     
                     #accumulate rewards for summary logger
                     for vehicle_id in range(self.num_controlled_vehicles):
-                        #select only the rewards for a specific controlled vehicle
-                        vehicle_rewards = self.reward[vehicle_id]
-                        valid_reward_indices = ~np.all(vehicle_rewards == np.nan, axis=1)
-                        vehicle_rewards = vehicle_rewards[valid_reward_indices]
-
-                        #compute rewards and add them to the accumulated reward array
-                        vehicle_rewards =  np.sum(vehicle_rewards, axis=0) / vehicle_rewards.shape[0]
+                        #select only the ego rewards for a specific controlled vehicle
+                        vehicle_rewards = self.reward[vehicle_id][0]
                         accumulated_reward[vehicle_id] += vehicle_rewards
                     
 
                     #populate vehicle logger
                     controlled_vehicles_count = 0
-                    for vehicle_id, vehicle in enumerate(self.eval_env.road.vehicles):
+                    for vehicle_id, vehicle in enumerate(self.eval_env.unwrapped.road.vehicles):
                         action = np.nan
                         lane = vehicle.lane_index[2]
                         acc = vehicle.action["acceleration"]
@@ -385,7 +377,6 @@ class MOMA_DQN:
                 for vehicle_id in range(self.num_controlled_vehicles):
                     eval_logger.add(repetition_nr, tuple_index, weight_tuple.tolist(), curr_num_iterations, vehicle_id, *normalised_reward[vehicle_id].tolist(), *accumulated_reward[vehicle_id].tolist())
         
-
         #compute hypervolume if reference point is given
         if hv_reference_point is not None:
             df = eval_logger.to_dataframe()
@@ -397,7 +388,7 @@ class MOMA_DQN:
         return eval_logger.to_dataframe(), vehicle_logger.to_dataframe()
 
     def reduce_epsilon(self, max_iteration, eps_start, eps_end):
-        self.epsilon = self.epsilon - (eps_start-eps_end)/max_iteration
+        self.epsilon = max(eps_end, self.epsilon - (eps_start-eps_end)/max_iteration)
 
     def set_objective_weights(self, weights: torch.Tensor):
         self.objective_weights = weights.to(self.device)

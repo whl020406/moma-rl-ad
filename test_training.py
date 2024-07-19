@@ -32,7 +32,7 @@ env.unwrapped.configure({
 import torch.nn as nn
 obs, info = env.reset()
 agent = MO_DQN.MO_DQN(env, loss_criterion=nn.SmoothL1Loss, num_objectives=2, seed=11, observation_space_shape=obs[0].shape, replay_buffer_size=100, batch_ratio=0.6, objective_names=["speed_reward", "energy_reward"])
-#df = agent.train(1000, epsilon_start=0.9, epsilon_end=0.05, inv_optimisation_frequency=1, num_evaluations=2)
+df = agent.train(100, epsilon_start=0.9, epsilon_end=0.0, epsilon_end_time=1, inv_optimisation_frequency=1)
 agent.evaluate()
 #df.plot.line(x="iteration", y="loss")
 #plt.show()

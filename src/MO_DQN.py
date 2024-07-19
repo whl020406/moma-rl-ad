@@ -94,7 +94,7 @@ class MO_DQN:
         return policy_net, target_net
 
     def train(self, num_iterations: int = 1000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 20, 
-                epsilon_start: float = 0.05, epsilon_end: float = 0, num_evaluations: int = 0, eval_seed: int = 11) :
+                epsilon_start: float = 0.9, epsilon_end: float = 0, epsilon_end_time: float = 1, num_evaluations: int = 0, eval_seed: int = 11) :
         '''
         Runs the training procedure for num_iterations iterations. The inv_optimisation_frequency specifies 
         the number of iterations after which a weight update occurs.The inv_target_update_frequency specifies 
@@ -102,6 +102,7 @@ class MO_DQN:
         Gamma is the discount factor for the rewards. Epsilon is the probability of a random action being selected during training.
         Its value is linearly reduced during the training procedure from epsilon_start to epsilon_end.
         num_evaluations specifies the number of equally spaced evaluation runs that are conducted throughout the training process.
+        epsilon_end_time specifies the ratio of iterations that will have been conducted as epsilon reaches the value of epsilon_end
         '''
         #compute evaluation interval
         if num_evaluations != 0:
@@ -124,10 +125,11 @@ class MO_DQN:
         self.loss_func = self.loss_criterion(reduction="mean")
         episode_nr = 0
         num_of_conducted_optimisation_steps = 0
+        max_eps_iteration = round(num_iterations * epsilon_end_time)
         #take step in environment
         for i in trange(num_iterations, desc="Training iterations", mininterval=2):
             self.action = self.act(self.obs, eps_greedy=True)
-            self.reduce_epsilon(num_iterations, epsilon_start, epsilon_end) #linearly reduce the value of epsilon
+            self.reduce_epsilon(max_eps_iteration, epsilon_start, epsilon_end) #linearly reduce the value of epsilon
             (
                 self.next_obs,
                 self.reward,
@@ -256,7 +258,6 @@ class MO_DQN:
         objective_weights = get_reference_directions("energy", n_dim = self.num_objectives, n_points = num_points, seed=seed)
         objective_weights = torch.from_numpy(objective_weights).to(self.device)
         
-
         #instantiate data loggers
         #for summary information
         feature_names = ["repetition_number", "weight_index","weight_tuple", "num_iterations"]
@@ -301,7 +302,7 @@ class MO_DQN:
                         self.reward = info["rewards"]
 
                     #populate vehicle logger
-                    for v_id, vehicle in enumerate(self.eval_env.road.vehicles):
+                    for v_id, vehicle in enumerate(self.eval_env.unwrapped.road.vehicles):
                         action = np.nan
                         lane = vehicle.lane_index[2]
                         acc = vehicle.action["acceleration"]
@@ -332,7 +333,7 @@ class MO_DQN:
         return eval_logger.to_dataframe(), vehicle_logger.to_dataframe()
 
     def reduce_epsilon(self, max_iteration, eps_start, eps_end):
-        self.epsilon = self.epsilon - (eps_start-eps_end)/max_iteration
+        self.epsilon = max(eps_end,self.epsilon - (eps_start-eps_end)/max_iteration)
 
     def set_objective_weights(self, weights: torch.Tensor):
         self.objective_weights = weights.to(self.device)
