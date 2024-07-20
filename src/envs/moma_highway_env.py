@@ -147,7 +147,7 @@ class MOMAHighwayEnv(HighwayEnvFast):
             #controlled vehicle
             vehicle = Vehicle.create_random(
                 self.road,
-                speed=25,
+                speed=None,
                 lane_id=self.config["initial_lane_id"],
                 spacing=self.config["ego_spacing"]
             )
