@@ -26,7 +26,7 @@ class MO_DQN:
         observation_space_shape: Sequence[int] = [1,1], num_objectives: int = 2, num_actions: int = 5, 
         replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, objective_weights: Sequence[float] = None,
         loss_criterion: _Loss = nn.SmoothL1Loss, gamma: float = 0.99,
-        objective_names: List[str] = None, scalarisation_method = LinearScalarisation, scalarisation_argument_list: List = [],
+        objective_names: List[str] = ["speed_reward", "energy_reward"], scalarisation_method = LinearScalarisation, scalarisation_argument_list: List = [],
         use_reward_normalisation_wrapper: bool = False, use_default_reward_normalisation: bool = True,
         network_hidden_sizes: List[int] = None, use_double_q_learning: bool = True) -> None:
         
@@ -49,7 +49,8 @@ class MO_DQN:
                 env = MONormalizeReward(env, idx=i, gamma=self.gamma)
 
         self.env = env
-            
+        self.env.unwrapped.configure({"rng": self.rng})
+
         self.rng = np.random.default_rng(seed)
         torch.manual_seed(seed)
 
@@ -257,6 +258,8 @@ class MO_DQN:
             The hv_reference_point is a vector specifying the best possible vectorial reward vector."""
         
         self.eval_env = deepcopy(self.env) #TODO: test whether deepcopy works
+        self.eval_env.unwrapped.configure({"rng": self.rng})
+
         if episode_recording_interval is not None:
             self.eval_env = RecordVideoV0(self.env, video_folder="videos", name_prefix="training_MODQN", 
                                                 episode_trigger=lambda x: x % episode_recording_interval == 0, fps=30)

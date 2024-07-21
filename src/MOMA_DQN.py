@@ -23,19 +23,23 @@ class MOMA_DQN:
     and sharing experiences using a shared replay buffer. The DQN network has access to the objective weights of other autonomous agents
     and uses a fixed weight of human agents.
     """
+    
+    OBSERVATION_SPACE_LIST = ["Kinematics", "OccupancyGrid"]
 
     def __init__(self, env: gym.Env | None, device: device = None, seed: int | None = None, 
         observation_space_length: int = 30, num_objectives: int = 2, num_actions: int = 5, 
         replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, 
         objective_weights: Sequence[float] = None, loss_criterion: _Loss = nn.SmoothL1Loss, 
-        objective_names: List[str] = None, scalarisation_method = LinearScalarisation, 
+        objective_names: List[str] = ["speed_reward", "energy_reward"], scalarisation_method = LinearScalarisation, 
         scalarisation_argument_list: List = [],ego_reward_priority: float = 0.5, 
-        reward_structure: str = "mean_reward", use_double_q_learning: bool = True) -> None:
+        reward_structure: str = "mean_reward", use_double_q_learning: bool = True,
+        observation_space_name: str = "Kinematics") -> None:
         
         if objective_names is None:
             objective_names = [f"reward_{x}" for x in range(num_objectives)]
-        
         assert len(objective_names) == num_objectives, "The number of elements in the objective_names list must be equal to the number of objectives!"
+        assert observation_space_name in MOMA_DQN.OBSERVATION_SPACE_LIST
+
         self.objective_names = objective_names
         self.ego_reward_priority = ego_reward_priority
         self.reward_structure = reward_structure
@@ -44,6 +48,8 @@ class MOMA_DQN:
         self.use_double_q_learning = use_double_q_learning
         self.rng = np.random.default_rng(seed)
         torch.manual_seed(seed)
+
+        self.env.unwrapped.configure({"rng": self.rng})
 
         self.device = device
         if self.device is None:
@@ -56,7 +62,9 @@ class MOMA_DQN:
 
         self.num_actions = num_actions
 
+        #set proper observation space
         self.observation_space_length = observation_space_length
+        self.__configure_observation_space(observation_space_name, self.reward_structure)
 
         #minus term because the objective weights of the ego vehicle are excluded
         (self.policy_net, self.target_net) = \
@@ -87,6 +95,18 @@ class MOMA_DQN:
             target_net.load_state_dict(policy_net.state_dict())
 
             return policy_net, target_net
+    
+    #TODO: implement this function to automatically configure the environment to use the correct observation space
+    #AugmentedMultiAgentObservation always needs to be used, the only difference is the included 
+    # type within the observation config (see test_marl.ipynb)
+    def __configure_observation_space(self, observation_space_name, reward_structure):
+        # input default observation dictionary to configure the environment with
+        pass
+        # update the dictionary based on the other input parameters: add certain features to the feature list, etc.
+        pass
+        # configure the environment accordingly
+        pass 
+
 
     def train(self, num_episodes: int = 5_000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 5, 
                 gamma: float = 0.9, epsilon_start: float = 0.9, epsilon_end: float = 0, epsilon_end_time: float = 1, num_evaluations: int = 0, eval_seed: int = 11) :
@@ -156,7 +176,7 @@ class MOMA_DQN:
                 
                 #use next_obs as obs during the next iteration
                 self.obs = self.next_obs
-
+                print(self.obs)# TODO: remove this line
             #update the weights every optimisation_frequency steps and only once the replay buffer is filled
             if ((episode_nr % inv_optimisation_frequency) == 0) and (self.buffer.num_elements == self.rb_size):
 
@@ -302,6 +322,8 @@ class MOMA_DQN:
             The hv_reference_point is a vector specifying the best possible vectorial reward vector."""
         
         self.eval_env = deepcopy(self.env) #TODO: test whether deepcopy works
+        self.eval_env.unwrapped.configure({"rng": self.rng})
+
         if episode_recording_interval is not None:
             self.eval_env = RecordVideoV0(self.eval_env, video_folder="videos", name_prefix="training_MODQN", 
                                                 episode_trigger=lambda x: x % episode_recording_interval == 0, fps=30)

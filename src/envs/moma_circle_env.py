@@ -26,14 +26,28 @@ class MOMACircleEnv(CircleEnv):
         config = super().default_config()
         config.update(
             {
+            "num_lanes": 3,
+            "inner_lane_radius": 30,
+            "vehicles_count": 5,
+            "controlled_vehicles": 2,
+            "vehicles_density" : 0.5,
+
             "collision_reward": -1,
             "high_speed_reward": 1,
             "lane_change_reward": -0.05,
             "energy_consumption_reward": 1,
             "right_lane_reward": 0.1,
             "normalize_reward": True,
-            "energy_consumption_function": NaiveEnergyCalculation
+            "energy_consumption_function": NaiveEnergyCalculation,
+
+            "max_speed" : 10,
+            "min_speed" : 2,
+            "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"), #uses GPU if possible
+            "rng": np.random.default_rng(None), #sets random seed for rng by default
+            "ego_spacing": 2,
+            "vehicles_density": 1,
             })
+        config["action"] = {"type": "DiscreteMetaAction", "target_speeds": np.linspace(config["min_speed"], config["max_speed"], endpoint=True, num=5), "lateral":True}
         return config
     
     def _reward(self, action) -> float:
@@ -72,7 +86,7 @@ class MOMACircleEnv(CircleEnv):
                         else vehicle.lane_index[2]
                     # Use forward speed rather than speed, see https://github.com/eleurent/highway-env/issues/268
                     forward_speed = vehicle.speed * np.cos(vehicle.heading)
-                    scaled_speed = utils.lmap(forward_speed, self.config["reward_speed_range"], [0, 1])
+                    scaled_speed = utils.lmap(forward_speed, [self.config["min_speed"], self.config["max_speed"]], [0, 1])
 
                     dict = {
                         "collision_reward": float(vehicle.crashed),
@@ -150,7 +164,7 @@ class MOMACircleEnv(CircleEnv):
         self.action_space = self.action_type.space()
 
 
-    def _create_vehicles(self) -> None:
+    def _make_vehicles(self) -> None:
         """Create some new random vehicles of a given type, and add them on the road."""
         other_vehicles_type = utils.class_from_path(self.config["other_vehicles_type"])
         other_per_controlled = near_split(self.config["vehicles_count"], num_bins=self.config["controlled_vehicles"])
@@ -172,10 +186,8 @@ class MOMACircleEnv(CircleEnv):
             vehicle.objective_weights = random_objective_weights(num_objectives=2, rng = self.config["rng"], device= self.config["device"])
             
             #add controlled vehicle to list
-            max_speed = vehicle.target_speeds[-1]
-            min_speed = vehicle.target_speeds[0]
-            vehicle.MAX_SPEED = max_speed
-            vehicle.MIN_SPEED = min_speed
+            vehicle.MAX_SPEED = self.config["max_speed"]
+            vehicle.MIN_SPEED = self.config["min_speed"]
             self.controlled_vehicles.append(vehicle)
             self.road.vehicles.append(vehicle)
 
@@ -186,7 +198,7 @@ class MOMACircleEnv(CircleEnv):
                 vehicle.is_controlled = 0
 
                 #set weights of 0.0 for each objective for uncontrolled vehicles (2-objectives)
-                vehicle.MAX_SPEED = max_speed
-                vehicle.MIN_SPEED = min_speed
+                vehicle.MAX_SPEED = self.config["max_speed"]
+                vehicle.MIN_SPEED = self.config["min_speed"]
                 vehicle.objective_weights = torch.tensor([0.0,0.0], device=self.config["device"])
                 self.road.vehicles.append(vehicle)
