@@ -106,7 +106,7 @@ class AugmentedKinematicObservation(KinematicObservation):
 
     def get_standard_features(self, features):
         standard_features = features.copy()
-        additional_features = ['obj_weights', 'lane_info']
+        additional_features = ['obj_weights', 'is_controlled', 'lane_info']
         for a in additional_features:
             if a in standard_features:
                 standard_features.remove(a)
@@ -130,8 +130,9 @@ class AugmentedKinematicObservation(KinematicObservation):
 
         #add objective weights features and is_controlled flag to ego vehicle observation
         if "obj_weights" in self.features:
+            augment_dict.update({"objective_weights": np.nan})
+        if "is_controlled" in self.features:
             augment_dict.update({"is_controlled": self.observer_vehicle.is_controlled})
-            augment_dict.update({f"objective_weights_{n}": np.nan for n, w in enumerate(self.observer_vehicle.objective_weights)})
         if "lane_info" in self.features:
             augment_dict.update({"lane": self.observer_vehicle.lane_index[2]})
 
@@ -156,10 +157,9 @@ class AugmentedKinematicObservation(KinematicObservation):
             for v in close_vehicles[-self.vehicles_count + 1:]:
                 v_dict = {}
                 if "obj_weights" in self.features:
-                    v_dict.update(dict(
-                                {"is_controlled": v.is_controlled},
-                                **{f"objective_weights_{n}": float(w) for n, w in enumerate(v.objective_weights)}
-                                ))
+                    v_dict.update({"objective_weight": float(v.objective_weights[0])})
+                if "is_controlled" in self.features:
+                    v_dict.update({"is_controlled": v.is_controlled})
                 if "lane_info" in self.features:
                     v_dict["lane"] = v.lane_index[2]
                 

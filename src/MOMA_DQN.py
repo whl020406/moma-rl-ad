@@ -100,12 +100,29 @@ class MOMA_DQN:
     #AugmentedMultiAgentObservation always needs to be used, the only difference is the included 
     # type within the observation config (see test_marl.ipynb)
     def __configure_observation_space(self, observation_space_name, reward_structure):
-        # input default observation dictionary to configure the environment with
-        pass
-        # update the dictionary based on the other input parameters: add certain features to the feature list, etc.
-        pass
-        # configure the environment accordingly
-        pass 
+        # default observation dictionary to configure the environment with
+        observation_dict= {
+            "observation": {
+            "type": "AugmentedMultiAgentObservation",
+            "observation_config": {
+                "see_behind": True,
+                "vehicles_count": 8,
+                "type": "Kinematics",
+                "features": ['presence', 'x', 'y', 'vx', 'vy', "lane_info"]
+                }
+            }
+        }
+        # update the dictionary based on the selected observation space type
+        if observation_space_name == "OccupancyGrid":
+            observation_dict["type"] = "OccupancyGrid"
+            observation_dict["features"] = ['presence', 'vx', 'vy', 'on_road']
+
+        # update the dictionary based on the selected reward structure
+        if reward_structure == "mean_reward":
+            observation_dict["features"].append("obj_weights", "is_controlled")
+        
+        #configure the environment using the constructed observation dictionary
+        self.env.unwrapped.configure(observation_dict)
 
 
     def train(self, num_episodes: int = 5_000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 5, 

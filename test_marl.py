@@ -17,7 +17,7 @@ env.unwrapped.configure({
         "type": "AugmentedMultiAgentObservation",
         "observation_config": {
             "type": "Kinematics",
-            "see_behind": False
+            "see_behind": False,
         }
     },
     "action": {
