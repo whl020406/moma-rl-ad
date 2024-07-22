@@ -9,7 +9,7 @@ from highway_env.vehicle.controller import MDPVehicle
 from highway_env.vehicle.kinematics import Vehicle
 from highway_env.envs.common.observation import Optional
 from highway_env.envs.common.action import Action
-from src.utils import AugmentedMultiAgentObservation
+from observations import AugmentedMultiAgentObservation
 from highway_env.envs.common.action import action_factory
 from highway_env.utils import near_split
 import torch

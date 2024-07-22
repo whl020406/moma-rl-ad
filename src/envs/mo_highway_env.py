@@ -10,7 +10,7 @@ import torch
 from utils import random_objective_weights
 from highway_env.envs.common.action import action_factory, Action
 from highway_env.envs.common.observation import observation_factory
-from utils import AugmentedMultiAgentObservation
+from observations import AugmentedMultiAgentObservation
 
 class MOHighwayEnv(HighwayEnvFast):
     '''Extends the standard highway environment to work with multiple objectives. The code was taken straight

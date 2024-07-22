@@ -113,10 +113,7 @@ class AugmentedKinematicObservation(KinematicObservation):
 
         return standard_features
     def space(self) -> spaces.Space:
-        self.num_features = len(self.features)
-        if "obj_weights" in self.features:
-            self.num_features += self.num_objectives
-        return spaces.Box(shape=(self.vehicles_count, self.num_features), low=-np.inf, high=np.inf, dtype=np.float32)
+        return spaces.Box(shape=(self.vehicles_count, len(self.features)), low=-np.inf, high=np.inf, dtype=np.float32)
 
     def observe(self) -> Tuple[np.ndarray, List[Vehicle]]:
         vehicle_list = []
@@ -157,7 +154,7 @@ class AugmentedKinematicObservation(KinematicObservation):
             for v in close_vehicles[-self.vehicles_count + 1:]:
                 v_dict = {}
                 if "obj_weights" in self.features:
-                    v_dict.update({"objective_weight": float(v.objective_weights[0])})
+                    v_dict.update({"objective_weights": float(v.objective_weights[0])})
                 if "is_controlled" in self.features:
                     v_dict.update({"is_controlled": v.is_controlled})
                 if "lane_info" in self.features:
@@ -178,12 +175,9 @@ class AugmentedKinematicObservation(KinematicObservation):
             df = self.normalize_obs(df, MAX_SPEED, MIN_SPEED)
         # Fill missing rows
         if df.shape[0] < self.vehicles_count:
-            rows = np.zeros((self.vehicles_count - df.shape[0], self.num_features))
+            rows = np.zeros((self.vehicles_count - df.shape[0], len(self.features)))
             df = pd.concat([df, pd.DataFrame(data=rows, columns=df.columns)], ignore_index=True)
-        # Reorder
         obs = df.values.copy()
-        if self.order == "shuffled":
-            self.env.np_random.shuffle(obs[1:])
         # Flatten
         obs = obs.astype(self.space().dtype)
         return obs.astype(self.space().dtype), vehicle_list
@@ -230,6 +224,8 @@ class AugmentedOccupancyGridObservation(OccupancyGridObservation):
     def __init__(self,
                  env: 'AbstractEnv',
                  features: Optional[List[str]] = None,
+                 vehicles_count: int = 5,
+                 see_behind: bool = False,
                  grid_size: Optional[Tuple[Tuple[float, float], Tuple[float, float]]] = None,
                  grid_step: Optional[Tuple[float, float]] = None,
                  features_range: Dict[str, List[float]] = None,
@@ -250,6 +246,8 @@ class AugmentedOccupancyGridObservation(OccupancyGridObservation):
         :param clip: clip the observation in [-1, 1]
         """
         super().__init__(env)
+        self.vehicles_count = vehicles_count
+        self.see_behind = see_behind
         self.features = features if features is not None else self.FEATURES
         self.grid_size = np.array(grid_size) if grid_size is not None else np.array(self.GRID_SIZE)
         self.grid_step = np.array(grid_step) if grid_step is not None else np.array(self.GRID_STEP)
@@ -301,7 +299,7 @@ class AugmentedOccupancyGridObservation(OccupancyGridObservation):
                                                          self.env.PERCEPTION_DISTANCE,
                                                          count=self.vehicles_count - 1,
                                                          see_behind=self.see_behind,
-                                                         sort=self.order == "sorted")
+                                                         sort=True)
             if close_vehicles:
                 vehicle_list.extend(close_vehicles) #add close vehicles to vehicle list
 
@@ -315,7 +313,7 @@ class AugmentedOccupancyGridObservation(OccupancyGridObservation):
 
                 #adding additional features for the augmented observation space
                 if "obj_weights" in self.features:
-                    v_dict["obj_weights"] = vehicle.obj_weights
+                    v_dict["obj_weights"] = vehicle.objective_weights[0]
                 if "is_controlled" in self.features:
                     v_dict["is_controlled"] = vehicle.is_controlled
                 

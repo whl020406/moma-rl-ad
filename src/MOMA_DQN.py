@@ -11,7 +11,7 @@ from tqdm import trange
 from typing import List
 from pymoo.util.ref_dirs import get_reference_directions
 from DQN_Network import DQN_Network
-from utils import AugmentedMultiAgentObservation
+from observations import AugmentedMultiAgentObservation
 import pandas as pd
 from copy import deepcopy
 from src.utils import calc_hypervolume
@@ -27,7 +27,7 @@ class MOMA_DQN:
     OBSERVATION_SPACE_LIST = ["Kinematics", "OccupancyGrid"]
 
     def __init__(self, env: gym.Env | None, device: device = None, seed: int | None = None, 
-        observation_space_length: int = 30, num_objectives: int = 2, num_actions: int = 5, 
+        num_objectives: int = 2, num_actions: int = 5, 
         replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, 
         objective_weights: Sequence[float] = None, loss_criterion: _Loss = nn.SmoothL1Loss, 
         objective_names: List[str] = ["speed_reward", "energy_reward"], scalarisation_method = LinearScalarisation, 
@@ -63,10 +63,14 @@ class MOMA_DQN:
         self.num_actions = num_actions
 
         #set proper observation space
-        self.observation_space_length = observation_space_length
         self.__configure_observation_space(observation_space_name, self.reward_structure)
+        
+        #determine observation space length
+        obs, _ = self.env.reset()
+        obs = torch.tensor(obs[0], device=self.device) #reshape observations and
+        obs = obs[~torch.isnan(obs)].reshape(-1)       #remove nan values
+        self.observation_space_length = obs.shape[0]
 
-        #minus term because the objective weights of the ego vehicle are excluded
         (self.policy_net, self.target_net) = \
         self.__create_network(self.observation_space_length, self.num_actions, self.num_objectives)
 
@@ -101,28 +105,29 @@ class MOMA_DQN:
     # type within the observation config (see test_marl.ipynb)
     def __configure_observation_space(self, observation_space_name, reward_structure):
         # default observation dictionary to configure the environment with
-        observation_dict= {
+        config_dict= {
             "observation": {
-            "type": "AugmentedMultiAgentObservation",
-            "observation_config": {
-                "see_behind": True,
-                "vehicles_count": 8,
-                "type": "Kinematics",
-                "features": ['presence', 'x', 'y', 'vx', 'vy', "lane_info"]
-                }
+                "type": "AugmentedMultiAgentObservation",
+                "observation_config": {
+                    "see_behind": True,
+                    "vehicles_count": 8,
+                    "type": "Kinematics",
+                    "features": ['presence', 'x', 'y', 'vx', 'vy', "lane_info"]
+                    }
             }
         }
+        obs_dict = config_dict["observation"]
         # update the dictionary based on the selected observation space type
         if observation_space_name == "OccupancyGrid":
-            observation_dict["type"] = "OccupancyGrid"
-            observation_dict["features"] = ['presence', 'vx', 'vy', 'on_road']
+            obs_dict["observation_config"]["type"] = "OccupancyGrid"
+            obs_dict["observation_config"]["features"] = ['presence', 'vx', 'vy', 'on_road']
 
         # update the dictionary based on the selected reward structure
         if reward_structure == "mean_reward":
-            observation_dict["features"].append("obj_weights", "is_controlled")
+            obs_dict["observation_config"]["features"].extend(["obj_weights", "is_controlled"])
         
         #configure the environment using the constructed observation dictionary
-        self.env.unwrapped.configure(observation_dict)
+        self.env.unwrapped.configure(config_dict)
 
 
     def train(self, num_episodes: int = 5_000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 5, 
@@ -193,7 +198,6 @@ class MOMA_DQN:
                 
                 #use next_obs as obs during the next iteration
                 self.obs = self.next_obs
-                print(self.obs)# TODO: remove this line
             #update the weights every optimisation_frequency steps and only once the replay buffer is filled
             if ((episode_nr % inv_optimisation_frequency) == 0) and (self.buffer.num_elements == self.rb_size):
 

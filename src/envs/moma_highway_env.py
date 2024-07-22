@@ -9,7 +9,7 @@ from highway_env.vehicle.controller import ControlledVehicle
 from highway_env.utils import near_split
 from highway_env.envs.common.observation import *
 from highway_env.envs.common.action import action_factory
-from src.utils import AugmentedMultiAgentObservation
+from observations import AugmentedMultiAgentObservation
 from energy_calculation import NaiveEnergyCalculation
 import torch
 from utils import random_objective_weights
