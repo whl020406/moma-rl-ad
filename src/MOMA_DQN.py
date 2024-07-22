@@ -333,7 +333,7 @@ class MOMA_DQN:
 
         return tuple(joint_action)
 
-    def evaluate(self, num_repetitions: int = 5, num_points: int = 66, hv_reference_point: np.ndarray = None, seed: int = None, episode_recording_interval: int = None, render_episodes: bool = False):
+    def evaluate(self, num_repetitions: int = 5, num_points: int = 20, hv_reference_point: np.ndarray = None, seed: int = None, episode_recording_interval: int = None, video_name_prefix: str = "MOMA_DQN", video_location: str = "videos", render_episodes: bool = False):
         """ Evaluates the performance of the trained network by conducting num_repetitions episodes for each objective weights tuple. 
             the parameter num_points determines how many points in the objective-weight space are being explored. These weights
             are spaced equally according to the pymoo implementation: https://pymoo.org/misc/reference_directions.html.
@@ -349,7 +349,7 @@ class MOMA_DQN:
         #TODO: change it so that the video name includes vehicle weights
         #TODO: change render function to include additional information
         if episode_recording_interval is not None:
-            self.eval_env = RecordVideoV0(self.eval_env, video_folder="videos", name_prefix="training_MODQN", 
+            self.eval_env = RecordVideoV0(self.eval_env, video_folder= video_location, name_prefix= video_name_prefix, 
                                                 episode_trigger=lambda x: x % episode_recording_interval == 0, fps=30)
         
         self.rng = np.random.default_rng(seed)

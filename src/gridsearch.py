@@ -86,6 +86,18 @@ def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_path: 
     max_parameter_indices = np.array([len(x)-1 for x in run_config["init"].values()], dtype=int) #compute the maximum indices for each config parameter
     num_of_experiments = np.cumprod(max_parameter_indices + 1)[-1] #compute the number of experiments to run based on number of values in config
     
+    if "num_repetitions" in run_config["eval"]:
+        num_reps = run_config["eval"]["num_repetitions"]
+    else:
+        num_reps = 5 #default value specified in evaluate function of the agent
+
+    if "num_points" in run_config["eval"]:
+        num_pts = run_config["eval"]["num_repetitions"]
+    else:
+        num_pts = 20 #default value specified in evaluate function of the agent
+
+    record_interval = max(1,num_pts / 10) * num_reps
+
     #run all experiments
     df_list = []
     for env_config_id in tqdm(range(len(run_config["env"])), desc="Environment", position=1, leave=False):
@@ -98,7 +110,10 @@ def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_path: 
             agent = algorithm(env = env, num_objectives = 2, seed = seed, observation_space_shape = obs[0].shape, num_actions = 5, objective_names=["speed_reward", "energy_reward"], **parameters)
             agent.train(**run_config["train"])
             agent.store_network(csv_file_path, f"{experiment_name}_config_{env_config_id}_exp{experiment_id}.pth")
-            returns = agent.evaluate(**run_config["eval"])
+            
+            video_prefix = f"config_{env_config_id}_exp_{experiment_id}"
+            returns = agent.evaluate(episode_recording_interval= record_interval, video_name_prefix=video_prefix, video_location= file_path, **run_config["eval"])
+            
             df = returns[0]
             df = add_metadata(df, parameters, env_config_id)
             df.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}.csv")
