@@ -49,10 +49,10 @@ class MO_DQN:
                 env = MONormalizeReward(env, idx=i, gamma=self.gamma)
 
         self.env = env
-        self.env.unwrapped.configure({"rng": self.rng})
-
         self.rng = np.random.default_rng(seed)
         torch.manual_seed(seed)
+        self.env.unwrapped.configure({"rng": self.rng})
+
 
         self.device = device
         if self.device is None:
@@ -351,6 +351,9 @@ class MO_DQN:
 
     def store_network_weights(self, model_path: str, model_name: str):
         torch.save(self.policy_net.state_dict(), f"{model_path}_{model_name}")
+    
+    def store_network(self, model_path: str, model_name: str):
+        torch.save(self.policy_net, f"{model_path}{model_name}")
 
     def load_network_weights(self, model_path: str):
         self.policy_net.load_state_dict(torch.load(model_path))

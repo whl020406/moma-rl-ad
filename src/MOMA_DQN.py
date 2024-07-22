@@ -345,6 +345,9 @@ class MOMA_DQN:
         self.eval_env = deepcopy(self.env) #TODO: test whether deepcopy works
         self.eval_env.unwrapped.configure({"rng": self.rng})
 
+
+        #TODO: change it so that the video name includes vehicle weights
+        #TODO: change render function to include additional information
         if episode_recording_interval is not None:
             self.eval_env = RecordVideoV0(self.eval_env, video_folder="videos", name_prefix="training_MODQN", 
                                                 episode_trigger=lambda x: x % episode_recording_interval == 0, fps=30)
@@ -445,6 +448,9 @@ class MOMA_DQN:
 
     def store_network_weights(self, model_path: str, model_name: str):
         torch.save(self.policy_net.state_dict(), f"{model_path}_{model_name}")
+
+    def store_network(self, model_path: str, model_name: str):
+        torch.save(self.policy_net, f"{model_path}{model_name}")
 
     def load_network_weights(self, model_path: str):
         self.policy_net.load_state_dict(torch.load(model_path))

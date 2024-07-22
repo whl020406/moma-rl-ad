@@ -34,6 +34,5 @@ obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in obs]
 moma_agent = MOMA_DQN.MOMA_DQN(env, num_objectives=2, seed=11, replay_buffer_size=10, batch_ratio=0.3,
                       objective_names=["speed_reward", "energy_reward"], observation_space_name="OccupancyGrid", reward_structure="mean_reward")
 moma_agent.train(30, epsilon_start=0.9, epsilon_end=0.0, epsilon_end_time=0.6)
-
-df = moma_agent.evaluate(num_repetitions= 2, num_points=3, seed=11, episode_recording_interval=None)
-print(df)
+#df = moma_agent.evaluate(num_repetitions= 2, num_points=3, seed=11, episode_recording_interval=None)
+#print(df)

@@ -97,6 +97,7 @@ def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_path: 
             obs, _ = env.reset()
             agent = algorithm(env = env, num_objectives = 2, seed = seed, observation_space_shape = obs[0].shape, num_actions = 5, objective_names=["speed_reward", "energy_reward"], **parameters)
             agent.train(**run_config["train"])
+            agent.store_network(csv_file_path, f"{experiment_name}_config_{env_config_id}_exp{experiment_id}.pth")
             returns = agent.evaluate(**run_config["eval"])
             df = returns[0]
             df = add_metadata(df, parameters, env_config_id)
