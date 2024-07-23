@@ -31,9 +31,8 @@ class MOMA_DQN:
         replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, 
         objective_weights: Sequence[float] = None, loss_criterion: _Loss = nn.SmoothL1Loss, 
         objective_names: List[str] = ["speed_reward", "energy_reward"], scalarisation_method = LinearScalarisation, 
-        scalarisation_argument_list: List = [],ego_reward_priority: float = 0.5, 
-        reward_structure: str = "mean_reward", use_double_q_learning: bool = True,
-        observation_space_name: str = "Kinematics") -> None:
+        scalarisation_argument_list: List = [], reward_structure: str = "mean_reward", 
+        use_double_q_learning: bool = True, observation_space_name: str = "Kinematics") -> None:
         
         if objective_names is None:
             objective_names = [f"reward_{x}" for x in range(num_objectives)]
@@ -41,7 +40,6 @@ class MOMA_DQN:
         assert observation_space_name in MOMA_DQN.OBSERVATION_SPACE_LIST
 
         self.objective_names = objective_names
-        self.ego_reward_priority = ego_reward_priority
         self.reward_structure = reward_structure
         self.env = env
         self.num_controlled_vehicles = len(self.env.unwrapped.controlled_vehicles)
@@ -100,9 +98,6 @@ class MOMA_DQN:
 
             return policy_net, target_net
     
-    #TODO: implement this function to automatically configure the environment to use the correct observation space
-    #AugmentedMultiAgentObservation always needs to be used, the only difference is the included 
-    # type within the observation config (see test_marl.ipynb)
     def __configure_observation_space(self, observation_space_name, reward_structure):
         # default observation dictionary to configure the environment with
         config_dict= {
@@ -162,7 +157,7 @@ class MOMA_DQN:
         max_eps_iteration = round(num_episodes * epsilon_end_time)
 
         #training loop
-        for episode_nr in trange(num_episodes, desc="Training episodes", mininterval=2):
+        for episode_nr in trange(num_episodes, desc="Training episodes", mininterval=2, position=3):
             #reset environment
             self.terminated = False
             self.truncated = False
@@ -206,7 +201,7 @@ class MOMA_DQN:
                 
             #run evaluation
             if (num_evaluations != 0) and (episode_nr % eval_interval == 0):
-                _, hv = self.evaluate(num_repetitions= 5, num_points= 10, hv_reference_point=np.array([0,0]),
+                _,_, hv = self.evaluate(num_repetitions= 5, num_points= 10, hv_reference_point=np.array([0,0]),
                                         seed = eval_seed)
                 hv_logger.add(episode=episode_nr, hypervolume=hv)
 
@@ -345,8 +340,6 @@ class MOMA_DQN:
         self.eval_env = deepcopy(self.env) #TODO: test whether deepcopy works
         self.eval_env.unwrapped.configure({"rng": self.rng})
 
-
-        #TODO: change it so that the video name includes vehicle weights
         #TODO: change render function to include additional information
         if episode_recording_interval is not None:
             self.eval_env = RecordVideoV0(self.eval_env, video_folder= video_location, name_prefix= video_name_prefix, 
@@ -370,7 +363,7 @@ class MOMA_DQN:
         feature_names.extend([f"curr_{x}" for x in self.objective_names])
         vehicle_logger = DataLogger("vehicle_logger", feature_names)
         
-        for tuple_index in trange(objective_weights.shape[0], desc="Weight tuple", mininterval=1):#
+        for tuple_index in trange(objective_weights.shape[0], desc="Weight tuple", mininterval=1, position=3):
             weight_tuple = objective_weights[tuple_index]
             self.objective_weights = weight_tuple
 

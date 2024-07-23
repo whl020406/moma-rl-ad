@@ -3,6 +3,7 @@ import itertools
 import pandas as pd
 import numpy as np
 import os
+from src.MOMA_DQN import MOMA_DQN
 
 def increment_indices(current_indices, max_indices):
     '''
@@ -60,9 +61,9 @@ def create_dataframe_from_results(algorithm_config, parameter_values_list, metri
     df_results["algorithm"] = algorithm_name #append information on which search algorithm was used
     return df_results
 
-def add_metadata(df: pd.DataFrame, parameters, env_config_id):
+def add_metadata(df: pd.DataFrame, parameters, env_config_id, experiment_id):
     df["env_config_id"] = env_config_id
-
+    df["experiment_id"] = experiment_id
     for parameter_name, value in parameters.items():
         #tries setting the value, if that doesn't work, changes the datatype of the column to "object" and tries again
         try:
@@ -92,14 +93,16 @@ def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_path: 
         num_reps = 5 #default value specified in evaluate function of the agent
 
     if "num_points" in run_config["eval"]:
-        num_pts = run_config["eval"]["num_repetitions"]
+        num_pts = run_config["eval"]["num_points"]
     else:
         num_pts = 20 #default value specified in evaluate function of the agent
 
-    record_interval = max(1,num_pts / 10) * num_reps
+    record_interval = int(max(1, num_pts / 10) * num_reps)
 
     #run all experiments
-    df_list = []
+    summary_list = [] #stores summary data
+    detail_list = [] #stores detailed episode data
+    loss_list = [] #stores loss and hypervolume during training
     for env_config_id in tqdm(range(len(run_config["env"])), desc="Environment", position=1, leave=False):
         current_parameter_indices = np.zeros(len(run_config["init"]), dtype= int) #initialise current parameter indices to 0
         current_env_config = run_config["env"][env_config_id]# Old code: {k:v[env_config_id] for k,v in run_config["env"].items()}
@@ -107,19 +110,41 @@ def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_path: 
         for experiment_id in tqdm(range(num_of_experiments), desc="Experiments", position=2, leave=False):
             parameters = fetch_algorithm_parameters(run_config["init"], current_parameter_indices)
             obs, _ = env.reset()
-            agent = algorithm(env = env, num_objectives = 2, seed = seed, observation_space_shape = obs[0].shape, num_actions = 5, objective_names=["speed_reward", "energy_reward"], **parameters)
-            agent.train(**run_config["train"])
+            
+            #initialise and train the agent
+            if algorithm == MOMA_DQN:
+                agent = algorithm(env = env, num_objectives = 2, seed = seed, num_actions = 5, objective_names=["speed_reward", "energy_reward"], **parameters)
+            else:
+                agent = algorithm(env = env, num_objectives = 2, seed = seed, observation_space_shape = obs[0].shape, num_actions = 5, objective_names=["speed_reward", "energy_reward"], **parameters)
+            loss_logger = agent.train(**run_config["train"])
             agent.store_network(csv_file_path, f"{experiment_name}_config_{env_config_id}_exp{experiment_id}.pth")
             
+            #run a final evaluation using the trained agent
             video_prefix = f"config_{env_config_id}_exp_{experiment_id}"
-            returns = agent.evaluate(episode_recording_interval= record_interval, video_name_prefix=video_prefix, video_location= file_path, **run_config["eval"])
+            summary_logger, detail_logger = agent.evaluate(hv_reference_point = None, #hypervolume is not needed during evaluation because it can easily be computed during the analysis
+                                                    episode_recording_interval= record_interval,video_name_prefix=video_prefix, 
+                                                    video_location= file_path, **run_config["eval"])
             
-            df = returns[0]
-            df = add_metadata(df, parameters, env_config_id)
-            df.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}.csv")
-            df_list.append(df)
+            summary_logger = add_metadata(summary_logger, parameters, env_config_id, experiment_id)
+            detail_logger = add_metadata(detail_logger, parameters, env_config_id, experiment_id)
+            loss_logger = add_metadata(loss_logger, parameters, env_config_id, experiment_id)
+
+            summary_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_summary.csv")
+            detail_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_detail.csv")
+            loss_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_loss.csv")
+            
+            summary_list.append(summary_logger)
+            detail_list.append(detail_logger)
+            loss_list.append(loss_logger)
+            
             #increment indices of the current algorithm's parameters
             current_parameter_indices = increment_indices(current_parameter_indices, max_parameter_indices)
     
-    df = pd.concat(df_list)
-    df.to_csv(f"{file_path}_merged.csv")
+    summary = pd.concat(summary_list)
+    summary.to_csv(f"{file_path}_merged_summary.csv")
+
+    detail = pd.concat(detail_list)
+    detail.to_csv(f"{file_path}_merged_detail.csv")
+
+    loss = pd.concat(loss_list)
+    loss.to_csv(f"{file_path}_merged_loss.csv")
