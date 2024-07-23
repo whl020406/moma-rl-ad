@@ -29,6 +29,18 @@ class DQN_Network(nn.Module):
         stacked_arr = torch.stack(x_arr, dim=1)
         return stacked_arr
     
+class Multi_DQN_Network(nn.Module):
+    def __init__(self, n_observations, n_actions, n_objectives, hidden_sizes = [128,128,128]):
+        super(Multi_DQN_Network, self).__init__()
+        ego_net = DQN_Network(n_observations, n_actions, n_objectives, hidden_sizes)
+        social_net = DQN_Network(n_observations, n_actions, n_objectives, hidden_sizes)
+        self.network = nn.ModuleList([ego_net, social_net])
+    
+    def forward(self, x):
+        output = [self.network[i](x) for i in self.network]
+        stacked_output = torch.stack(output, dim=1)
+        return stacked_output
+
 
 class Single_Objective_DQN_Network(nn.Module):
 
@@ -46,6 +58,8 @@ class Single_Objective_DQN_Network(nn.Module):
         x = torch.relu(self.layer2(x))
         x = self.layer3(x)
         return x
+
+
 
 class Separated_DQN():
     def __init__(self, n_observations, n_actions, n_objectives, loss_function, device):

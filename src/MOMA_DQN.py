@@ -32,7 +32,8 @@ class MOMA_DQN:
         objective_weights: Sequence[float] = None, loss_criterion: _Loss = nn.SmoothL1Loss, 
         objective_names: List[str] = ["speed_reward", "energy_reward"], scalarisation_method = LinearScalarisation, 
         scalarisation_argument_list: List = [], reward_structure: str = "mean_reward", 
-        use_double_q_learning: bool = True, observation_space_name: str = "Kinematics") -> None:
+        use_double_q_learning: bool = True, observation_space_name: str = "Kinematics",
+        use_multi_dqn: bool = False) -> None:
         
         if objective_names is None:
             objective_names = [f"reward_{x}" for x in range(num_objectives)]
@@ -41,6 +42,7 @@ class MOMA_DQN:
 
         self.objective_names = objective_names
         self.reward_structure = reward_structure
+        self.use_multi_dqn = use_multi_dqn
         self.env = env
         self.num_controlled_vehicles = len(self.env.unwrapped.controlled_vehicles)
         self.use_double_q_learning = use_double_q_learning
