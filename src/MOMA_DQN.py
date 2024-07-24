@@ -10,8 +10,7 @@ from torch.nn.modules.loss import _Loss
 from tqdm import trange
 from typing import List
 from pymoo.util.ref_dirs import get_reference_directions
-from DQN_Network import DQN_Network
-from observations import AugmentedMultiAgentObservation
+from DQN_Network import DQN_Network, Multi_DQN_Network
 import pandas as pd
 from copy import deepcopy
 from src.utils import calc_hypervolume
@@ -39,10 +38,9 @@ class MOMA_DQN:
             objective_names = [f"reward_{x}" for x in range(num_objectives)]
         assert len(objective_names) == num_objectives, "The number of elements in the objective_names list must be equal to the number of objectives!"
         assert observation_space_name in MOMA_DQN.OBSERVATION_SPACE_LIST
-
+        assert not (use_multi_dqn and (reward_structure == "ego_reward")), "Can't use multi dqn in conjunction with ego reward!"
         self.objective_names = objective_names
         self.reward_structure = reward_structure
-        self.use_multi_dqn = use_multi_dqn
         self.env = env
         self.num_controlled_vehicles = len(self.env.unwrapped.controlled_vehicles)
         self.use_double_q_learning = use_double_q_learning
@@ -71,17 +69,28 @@ class MOMA_DQN:
         obs = obs[~torch.isnan(obs)].reshape(-1)       #remove nan values
         self.observation_space_length = obs.shape[0]
 
+        #multi dqn method selection
+        self.use_multi_dqn = use_multi_dqn
+        if self.use_multi_dqn:
+            self.update_weights_func = self.__update_weights_multi_DQN
+            self.act = self.__act_multi_DQN
+
+        else:
+            self.update_weights_func = self.__update_weights_single_DQN
+            self.act = self.__act_single_DQN
+
+
         (self.policy_net, self.target_net) = \
         self.__create_network(self.observation_space_length, self.num_actions, self.num_objectives)
 
         self.replay_enabled = replay_enabled
         self.rb_size = replay_buffer_size
         self.batch_ratio = batch_ratio
-
         self.loss_criterion = loss_criterion
 
-        #initialise replay buffer
-        self.buffer = ReplayBuffer(self.rb_size, self.observation_space_length, self.num_objectives, self.device, self.rng, importance_sampling=True)
+        #initialise replay buffer: num_objectives * 2 because we want to store ego and social reward separately and +1 because we also store the number of close vehicles
+        self.buffer = ReplayBuffer(self.rb_size, self.observation_space_length, (self.num_objectives*2 + 1), self.device, self.rng, importance_sampling=True)
+
 
         #initialise reward logger
         feature_names = ["episode"]
@@ -94,8 +103,13 @@ class MOMA_DQN:
 
     def __create_network(self, num_observations, num_actions, num_objectives) -> Tuple[nn.Module, nn.Module]:
             #create one network for each objective
-            policy_net = DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
-            target_net = DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
+            if self.use_multi_dqn:
+                policy_net = Multi_DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
+                target_net = Multi_DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
+            else:
+                policy_net = DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
+                target_net = DQN_Network(num_observations, num_actions, num_objectives).to(self.device)
+
             target_net.load_state_dict(policy_net.state_dict())
 
             return policy_net, target_net
@@ -163,7 +177,7 @@ class MOMA_DQN:
             #reset environment
             self.terminated = False
             self.truncated = False
-            self.obs, _ = self.env.reset()
+            self.obs, info = self.env.reset()
             self.obs = [torch.tensor(single_obs, device=self.device) for single_obs in self.obs] #reshape observations and
             self.obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.obs] #remove nan values
             accumulated_rewards = np.zeros(self.num_objectives)
@@ -174,7 +188,10 @@ class MOMA_DQN:
                 v.objective_weights = self.objective_weights     
 
             while not (self.terminated or self.truncated):
-                self.actions = self.act(self.obs, eps_greedy=True)
+                num_close_vehicles = None
+                if self.use_multi_dqn:
+                    num_close_vehicles = MOMA_DQN.__get_num_close_vehicles(info["vehicle_objective_weights"])
+                self.actions = self.act(self.obs, eps_greedy=True, num_close_vehicles=num_close_vehicles)
                 (
                     self.next_obs,
                     self.rewards,
@@ -198,7 +215,7 @@ class MOMA_DQN:
             #update the weights every optimisation_frequency steps and only once the replay buffer is filled
             if ((episode_nr % inv_optimisation_frequency) == 0) and (self.buffer.num_elements == self.rb_size):
 
-                self.__update_weights(episode_nr, num_of_conducted_optimisation_steps, inv_target_update_frequency)
+                self.update_weights_func(episode_nr, num_of_conducted_optimisation_steps, inv_target_update_frequency)
                 num_of_conducted_optimisation_steps += 1
                 
             #run evaluation
@@ -226,16 +243,10 @@ class MOMA_DQN:
     
     def compute_reward_summary(self, rewards, obj_weights):
         reward_summary = []
-        self.num_close_vehicles = rewards[0].shape[0]
 
         #iterate over each controlled vehicle
         for i in range(self.num_controlled_vehicles):
             r = torch.from_numpy(rewards[i]).to(self.device) #fetch associated rewards
-
-            #in case of a crash, use crash penalty
-            if self.crashed[i]:
-                reward_summary.append(r[0]) #ego penalty for crash
-                continue
 
             weights = torch.stack(obj_weights[i], dim=0).to(self.device) #fetch associated weights
             weights[torch.all(weights == 0, dim=1)] = 1/self.num_objectives #where vehicles are not controlled, assume equal weights
@@ -246,30 +257,43 @@ class MOMA_DQN:
                 assert torch.isnan(r[weights.shape[0]:]).all() #make sure all rewards beyond this point are nan
                 r = r[:weights.shape[0]] #remove all excess rows from r
             
+            #in case of a crash, use crash penalty
+            if self.crashed[i]:
+                r[:] = r[0][0].clone() #if crashed, use crash penalty regardless of obj weights
+                weights[:] = 1/self.num_objectives
+
             weighted_reward = r * weights
 
-            #summarise the list of rewards to a single reward value using the specified reward structure
-            summary = None
-            match self.reward_structure:
-                case "mean_reward":
-                    summary = torch.mean(weighted_reward, dim=0) #mean of ego and social rewards
-                case "ego_reward":
-                    summary = weighted_reward[0,:] #only select reward of ego vehicle
-                case _:
-                    raise ValueError('reward_structure argument not in list of available reward structures')
+            ego_reward = r[0,:] #for ego vehicle: use reward instead of utility
             
-            
-            reward_summary.append(summary)
-        
-        return reward_summary
-            
+            num_close_vehicles = 0
+            if weighted_reward.shape[0] > 1:
+                weighted_social_rewards = weighted_reward[1:,:]
+                num_close_vehicles = weighted_social_rewards.shape[0]
+                mean_weighted_social_reward = torch.sum(weighted_social_rewards,dim=0) / (num_close_vehicles)
+            else:
+                mean_weighted_social_reward = torch.tensor([0,0], device=self.device) #when no other vehicles are around the ego vehicle
 
-    def __update_weights(self, current_iteration, current_optimisation_iteration, inv_target_update_frequency):
+            # this means: in replay buffer, the first two elements in the reward are the ego reward 
+            # the next two are the mean social utility, the next two are the ego objective weights and 
+            # the last one is the number of close vehicles
+            num_close_vehicles = torch.tensor([num_close_vehicles], device= self.device)
+            stacked_rewards = torch.hstack([ego_reward, mean_weighted_social_reward, num_close_vehicles])
+            reward_summary.append(stacked_rewards)
+
+        return reward_summary
+    
+    def __get_num_close_vehicles(vehicle_obj_weights):
+        return [len(obj_weights) - 1 for obj_weights in vehicle_obj_weights] # -1 because the array includes the ego vehicle
+
+    def __update_weights_single_DQN(self, current_iteration, current_optimisation_iteration, inv_target_update_frequency):
+        self.policy_net.train()
         #fetch samples from replay buffer
         batch_samples = self.buffer.sample(round(self.buffer.num_elements*self.batch_ratio))
         observations = self.buffer.get_observations(batch_samples)
         next_obs = self.buffer.get_next_obs(batch_samples)
         actions = self.buffer.get_actions(batch_samples)
+        actions = actions[:,0:self.num_objectives,:]
         term_flags = self.buffer.get_termination_flag(batch_samples)
         rewards  = self.buffer.get_rewards(batch_samples)
 
@@ -289,7 +313,26 @@ class MOMA_DQN:
 
         next_state_values[term_flags] = 0 #set to 0 in case of a crash
 
-        exp_state_action_values = next_state_values * self.gamma + rewards
+                
+        ego_rewards = rewards[:,0:self.num_objectives]
+        mean_weighted_social_rewards = rewards[:,self.num_objectives:-1]
+        num_close_vehicles = rewards[:,-1]
+
+        current_reward = None
+        match self.reward_structure:
+            case "mean_reward":
+                mean_social_utility = torch.sum(mean_weighted_social_rewards, dim = 1) #TODO: test if the dimension is correct
+                social_utility = mean_social_utility*num_close_vehicles
+                social_utility = social_utility.reshape(-1,1)
+                social_utility = torch.hstack([social_utility, social_utility])
+                current_reward = (ego_rewards + social_utility)
+                current_reward = current_reward/(num_close_vehicles+1).reshape(-1,1)
+            case "ego_reward":
+                current_reward = ego_rewards #only select reward of ego vehicle
+            case _:
+                raise ValueError('reward_structure argument not in list of available reward structures')
+
+        exp_state_action_values = next_state_values * self.gamma + current_reward
 
         #compute loss between estimates and actual values
         loss = self.loss_func(state_action_values, exp_state_action_values)
@@ -307,8 +350,70 @@ class MOMA_DQN:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
 
 
-    def act(self, obs, eps_greedy: bool = False):
-        '''select a list of actions, one element for each autonomously controlled agent'''
+
+    #TODO: implement this function. ego and social network weights are updated independently of each other
+    def __update_weights_multi_DQN(self, current_iteration, current_optimisation_iteration, inv_target_update_frequency):
+        self.policy_net.train()
+
+        #fetch samples from replay buffer
+        batch_samples = self.buffer.sample(round(self.buffer.num_elements*self.batch_ratio))
+        observations = self.buffer.get_observations(batch_samples)
+        next_obs = self.buffer.get_next_obs(batch_samples)
+        actions = self.buffer.get_actions(batch_samples)
+        actions = actions[:,0:self.num_objectives,:]
+        term_flags = self.buffer.get_termination_flag(batch_samples)
+        rewards  = self.buffer.get_rewards(batch_samples)
+
+        #fetch Q values of the current observation and action from all the objectives Q-networks
+        state_action_values = self.policy_net(observations)
+        state_action_values = state_action_values.gather(2, actions)
+        state_action_values = state_action_values.reshape(observations.shape[0],self.num_objectives)
+
+        with torch.no_grad():
+            #code taken from https://github.com/eleurent/rl-agents/blob/master/rl_agents/agents/deep_q_network/pytorch.py
+            if self.use_double_q_learning:
+                best_actions_policy_net = self.policy_net(next_obs).argmax(2).unsqueeze(2)
+                target_net_estimate = self.target_net(next_obs)
+                next_state_values = target_net_estimate.gather(2, best_actions_policy_net).squeeze(2)
+            else:
+                next_state_values = self.target_net(next_obs).max(2).values
+
+        next_state_values[term_flags] = 0 #set to 0 in case of a crash
+
+                
+        ego_rewards = rewards[:,0:self.num_objectives]
+        weighted_social_rewards = rewards[:,self.num_objectives:-1]
+        num_close_vehicles = rewards[:,-1]
+
+        current_reward = None
+        match self.reward_structure:
+            case "mean_reward":
+                current_reward = torch.hstack(ego_rewards, weighted_social_rewards)
+            case "ego_reward":
+                raise ValueError("Multi_DQN only works with mean reward!")
+            case _:
+                raise ValueError('reward_structure argument not in list of available reward structures')
+
+        exp_state_action_values = next_state_values * self.gamma + current_reward
+
+        #compute loss between estimates and actual values
+        loss = self.loss_func(state_action_values, exp_state_action_values)
+        #store loss in loss logger
+        self.loss_logger.add(episode=current_iteration, loss=loss.item())
+
+        #backpropagate loss
+        self.optimiser.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
+        self.optimiser.step()
+
+        #update the target networks
+        if (current_optimisation_iteration % inv_target_update_frequency) == 0:
+                self.target_net.load_state_dict(self.policy_net.state_dict())
+
+    def __act_single_DQN(self, obs, eps_greedy: bool = False, num_close_vehicles: List[int] = None):
+        '''select a list of actions, one element for each autonomously controlled agent.
+        num_close_vehicles parameter was added to create a uniform function header irrespective of used network structure'''
         joint_action = []
         for single_obs in obs:
             r = self.rng.random()
@@ -321,6 +426,42 @@ class MOMA_DQN:
                     q_values = self.policy_net(single_obs)
                     q_values = q_values.reshape(self.num_objectives, self.num_actions)
                     scalarised_values = self.scalarisation_method.scalarise_actions(q_values, self.objective_weights)
+                    action = torch.argmax(scalarised_values).item()
+
+            else: # choose random action
+                action = self.rng.choice(self.num_actions)
+
+            joint_action.append(action)
+
+        return tuple(joint_action)
+    
+    #TODO: adjust this method to work with the MULTI-DQN 
+    # (apply obj weights to ego reward to get utility, sum with mean_social_utility * num_close vehicles 
+    # (get this from the newly created function))
+    def __act_multi_DQN(self, obs, eps_greedy: bool = False, num_close_vehicles: List[int] = None):
+        '''select a list of actions, one element for each autonomously controlled agent'''
+        assert num_close_vehicles != None, "num_close_vehicles must not be none!"
+        
+        joint_action = []
+        for i, single_obs in enumerate(obs):
+            r = self.rng.random()
+            action = None
+
+            #select best action according to policy
+            if not eps_greedy or r > self.epsilon:
+                with torch.no_grad():
+                    self.policy_net.eval()
+                    q_values = self.policy_net(single_obs)
+                    q_values_ego = q_values[0,:].reshape(self.num_objectives, self.num_actions)
+                    q_values_social = q_values[1,:].reshape(self.num_objectives, self.num_actions)
+
+                    scalarised_ego_values = self.scalarisation_method.scalarise_actions(q_values_ego, self.objective_weights)
+                    #the social neural network q value predictions are based on utility rather than the rewards, 
+                    # which means that they don't have to be weighted, thus objective weights of 1 are given to the scalarisation function
+                    scalarised_mean_social_values = self.scalarisation_method.scalarise_actions(q_values_social, torch.tensor([1]*self.num_objectives, device = self.device))
+                    
+                    #take action based on mean scalarised values
+                    scalarised_values = (scalarised_ego_values + (scalarised_mean_social_values * num_close_vehicles[i])) / num_close_vehicles[i] + 1
                     action = torch.argmax(scalarised_values).item()
 
             else: # choose random action
@@ -372,7 +513,7 @@ class MOMA_DQN:
             for repetition_nr in range(num_repetitions):
                 self.terminated = False
                 self.truncated = False
-                self.obs, _ = self.eval_env.reset()     
+                self.obs, info = self.eval_env.reset()     
                 # explicitly set objective weights in the environment object as well
                 # so that observations are correct
                 # currently every controlled vehicle has the same objective weights
@@ -387,7 +528,10 @@ class MOMA_DQN:
                     #select action based on obs. Execute action, add up reward, next iteration
                     self.obs = [torch.tensor(single_obs, device=self.device) for single_obs in self.obs] #reshape observations and
                     self.obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.obs] #remove nan values
-                    self.action = self.act(self.obs)
+                    num_close_vehicles = None
+                    if self.use_multi_dqn:
+                        num_close_vehicles = self.__get_num_close_vehicles(info["vehicle_objective_weights"])
+                    self.action = self.act(self.obs, eps_greedy=False, num_close_vehicles=num_close_vehicles)
                     (
                     self.obs,
                     self.reward,

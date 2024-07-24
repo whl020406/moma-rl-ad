@@ -37,8 +37,8 @@ class Multi_DQN_Network(nn.Module):
         self.network = nn.ModuleList([ego_net, social_net])
     
     def forward(self, x):
-        output = [self.network[i](x) for i in self.network]
-        stacked_output = torch.stack(output, dim=1)
+        output = [net(x) for net in self.network]
+        stacked_output = torch.stack(output, dim=0)
         return stacked_output
 
 

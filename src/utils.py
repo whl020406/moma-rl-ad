@@ -77,6 +77,7 @@ class ReplayBuffer:
                 elem = torch.concatenate([obs[i].flatten(), torch.tensor([action[i]], device=self.device), next_obs[i].flatten(), reward[i], 
                                           torch.tensor([terminated[i]], device=self.device), 
                                           torch.tensor([importance_sampling_id], device=self.device)])
+                
                 self.buffer[self.running_index] = elem
                 self.__increment_indices()
 
