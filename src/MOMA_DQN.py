@@ -354,45 +354,47 @@ class MOMA_DQN:
     #TODO: implement this function. ego and social network weights are updated independently of each other
     def __update_weights_multi_DQN(self, current_iteration, current_optimisation_iteration, inv_target_update_frequency):
         self.policy_net.train()
-
         #fetch samples from replay buffer
         batch_samples = self.buffer.sample(round(self.buffer.num_elements*self.batch_ratio))
         observations = self.buffer.get_observations(batch_samples)
         next_obs = self.buffer.get_next_obs(batch_samples)
         actions = self.buffer.get_actions(batch_samples)
-        actions = actions[:,0:self.num_objectives,:]
+        actions = actions[:,0:self.num_objectives*2,:] #*2 because we have two DQN networks (ego and social)
         term_flags = self.buffer.get_termination_flag(batch_samples)
         rewards  = self.buffer.get_rewards(batch_samples)
 
         #fetch Q values of the current observation and action from all the objectives Q-networks
         state_action_values = self.policy_net(observations)
+        state_action_values = torch.swapaxes(state_action_values, 0, 1)
+        state_action_values = torch.flatten(state_action_values, start_dim=1, end_dim=2)
         state_action_values = state_action_values.gather(2, actions)
-        state_action_values = state_action_values.reshape(observations.shape[0],self.num_objectives)
+        state_action_values = state_action_values.reshape(observations.shape[0],2,self.num_objectives) #2 because we have two DQN networks (ego and social)
 
         with torch.no_grad():
             #code taken from https://github.com/eleurent/rl-agents/blob/master/rl_agents/agents/deep_q_network/pytorch.py
             if self.use_double_q_learning:
-                best_actions_policy_net = self.policy_net(next_obs).argmax(2).unsqueeze(2)
+                #fetch best actions from policy net
+                policy_obs = self.policy_net(next_obs)
+                policy_obs = torch.swapaxes(policy_obs, 0, 1)
+                best_actions = policy_obs.argmax(3).unsqueeze(3)
+
+                #get target net estimate for best actions as next state values
                 target_net_estimate = self.target_net(next_obs)
-                next_state_values = target_net_estimate.gather(2, best_actions_policy_net).squeeze(2)
+                target_net_estimate = torch.swapaxes(target_net_estimate, 0, 1)
+                next_state_values = target_net_estimate.gather(3, best_actions).squeeze(3)
             else:
-                next_state_values = self.target_net(next_obs).max(2).values
+                target_net_estimate = self.target_net(next_obs)
+                target_net_estimate = torch.swapaxes(target_net_estimate, 0, 1)
+                next_state_values = target_net_estimate.max(3).values
 
         next_state_values[term_flags] = 0 #set to 0 in case of a crash
 
-                
         ego_rewards = rewards[:,0:self.num_objectives]
-        weighted_social_rewards = rewards[:,self.num_objectives:-1]
+        mean_weighted_social_rewards = rewards[:,self.num_objectives:-1]
         num_close_vehicles = rewards[:,-1]
 
-        current_reward = None
-        match self.reward_structure:
-            case "mean_reward":
-                current_reward = torch.hstack(ego_rewards, weighted_social_rewards)
-            case "ego_reward":
-                raise ValueError("Multi_DQN only works with mean reward!")
-            case _:
-                raise ValueError('reward_structure argument not in list of available reward structures')
+        # Multi_DQN only works with the mean reward structure and doesn't require us to merge the two rewards together
+        current_reward = torch.stack([ego_rewards, mean_weighted_social_rewards], dim=1)
 
         exp_state_action_values = next_state_values * self.gamma + current_reward
 
@@ -410,6 +412,7 @@ class MOMA_DQN:
         #update the target networks
         if (current_optimisation_iteration % inv_target_update_frequency) == 0:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
+
 
     def __act_single_DQN(self, obs, eps_greedy: bool = False, num_close_vehicles: List[int] = None):
         '''select a list of actions, one element for each autonomously controlled agent.
@@ -530,7 +533,7 @@ class MOMA_DQN:
                     self.obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.obs] #remove nan values
                     num_close_vehicles = None
                     if self.use_multi_dqn:
-                        num_close_vehicles = self.__get_num_close_vehicles(info["vehicle_objective_weights"])
+                        num_close_vehicles = MOMA_DQN.__get_num_close_vehicles(info["vehicle_objective_weights"])
                     self.action = self.act(self.obs, eps_greedy=False, num_close_vehicles=num_close_vehicles)
                     (
                     self.obs,
