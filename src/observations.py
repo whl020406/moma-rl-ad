@@ -65,7 +65,7 @@ class AugmentedKinematicObservation(KinematicObservation):
        various points.'''
 
 
-    FEATURES: List[str] = ['presence', 'x', 'y', 'vx', 'vy', "lane_info"]
+    FEATURES: List[str] = ['presence', 'x', 'y', 'vx', 'vy', "heading", "lat_off", "long_off", "lane_info"]
 
     def __init__(self, env: 'AbstractEnv',
                  features: List[str] = None,

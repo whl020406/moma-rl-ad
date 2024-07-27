@@ -97,7 +97,11 @@ def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_path: 
     else:
         num_pts = 20 #default value specified in evaluate function of the agent
 
-    record_interval = int(max(1, num_pts / 10) * num_reps)
+    if "episode_recording_interval" in run_config["eval"]:
+        record_interval = run_config["eval"]["episode_recording_interval"]
+        del run_config["eval"]["episode_recording_interval"]
+    else:
+        record_interval = int(max(1, num_pts / 10) * num_reps)
 
     #run all experiments
     summary_list = [] #stores summary data
@@ -112,31 +116,35 @@ def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_path: 
             obs, _ = env.reset()
             
             #initialise and train the agent
-            if algorithm == MOMA_DQN:
-                agent = algorithm(env = env, num_objectives = 2, seed = seed, num_actions = 5, objective_names=["speed_reward", "energy_reward"], **parameters)
-            else:
-                agent = algorithm(env = env, num_objectives = 2, seed = seed, observation_space_shape = obs[0].shape, num_actions = 5, objective_names=["speed_reward", "energy_reward"], **parameters)
-            loss_logger = agent.train(**run_config["train"])
-            agent.store_network(csv_file_path, f"{experiment_name}_config_{env_config_id}_exp{experiment_id}.pth")
-            
-            #run a final evaluation using the trained agent
-            video_prefix = f"config_{env_config_id}_exp_{experiment_id}"
-            summary_logger, detail_logger = agent.evaluate(hv_reference_point = None, #hypervolume is not needed during evaluation because it can easily be computed during the analysis
-                                                    episode_recording_interval= record_interval,video_name_prefix=video_prefix, 
-                                                    video_location= file_path, **run_config["eval"])
-            
-            summary_logger = add_metadata(summary_logger, parameters, env_config_id, experiment_id)
-            detail_logger = add_metadata(detail_logger, parameters, env_config_id, experiment_id)
-            loss_logger = add_metadata(loss_logger, parameters, env_config_id, experiment_id)
+            try:
+                if algorithm == MOMA_DQN:
+                    agent = algorithm(env = env, num_objectives = 2, seed = seed, num_actions = 5, objective_names=["speed_reward", "energy_reward"], **parameters)
+                else:
+                    agent = algorithm(env = env, num_objectives = 2, seed = seed, observation_space_shape = obs[0].shape, num_actions = 5, objective_names=["speed_reward", "energy_reward"], **parameters)
+                loss_logger = agent.train(**run_config["train"])
+                agent.store_network(csv_file_path, f"{experiment_name}_config_{env_config_id}_exp{experiment_id}.pth")
+                
+                #run a final evaluation using the trained agent
+                video_prefix = f"config_{env_config_id}_exp_{experiment_id}"
+                summary_logger, detail_logger = agent.evaluate(hv_reference_point = None, #hypervolume is not needed during evaluation because it can easily be computed during the analysis
+                                                        episode_recording_interval= record_interval,video_name_prefix=video_prefix, 
+                                                        video_location= file_path, **run_config["eval"])
+                
+                summary_logger = add_metadata(summary_logger, parameters, env_config_id, experiment_id)
+                detail_logger = add_metadata(detail_logger, parameters, env_config_id, experiment_id)
+                loss_logger = add_metadata(loss_logger, parameters, env_config_id, experiment_id)
 
-            summary_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_summary.csv")
-            detail_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_detail.csv")
-            loss_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_loss.csv")
-            
-            summary_list.append(summary_logger)
-            detail_list.append(detail_logger)
-            loss_list.append(loss_logger)
-            
+                summary_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_summary.csv")
+                detail_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_detail.csv")
+                loss_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_loss.csv")
+                
+                summary_list.append(summary_logger)
+                detail_list.append(detail_logger)
+                loss_list.append(loss_logger)
+            except Exception as e:
+                print("The following error occurred during the experimentation. The current experiment configuration will be skipped")
+                print(repr(e))
+
             #increment indices of the current algorithm's parameters
             current_parameter_indices = increment_indices(current_parameter_indices, max_parameter_indices)
     

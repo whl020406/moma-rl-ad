@@ -28,6 +28,7 @@ env_config = {
 #          "replay_buffer_size": [1000],
 #          "batch_ratio" : [0.2],
 #          "reward_structure" : ["ego_reward", "mean_reward"],
+#          "use_multi_dqn:" : [False,True],
 #          "observation_space_name" : ["Kinematics", "OccupancyGrid"],
 #     },
 #     "train": {
@@ -53,11 +54,12 @@ run_config = {
          "replay_buffer_size": [1000],
          "batch_ratio" : [0.2],
          "reward_structure" : ["ego_reward", "mean_reward"],
+         "use_multi_dqn" : [False,True],
          "observation_space_name" : ["Kinematics", "OccupancyGrid"],
     },
     "train": {
          "gamma": 0.9,
-         "num_episodes" : 100,
+         "num_episodes" : 5000,
          "inv_target_update_frequency": 10,
          "epsilon_start": 0.9,
          "epsilon_end": 0,
@@ -69,7 +71,6 @@ run_config = {
         "num_points": 3,
     },
 }
-
 
 env = mo_gym.make('moma-highway-env-v0', render_mode='rgb_array')
 gridsearch(MOMA_DQN, env, run_config, 11, csv_file_path="data/moma_highway_test/", experiment_name="moma_highway")

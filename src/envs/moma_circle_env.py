@@ -26,6 +26,8 @@ class MOMACircleEnv(CircleEnv):
         config = super().default_config()
         config.update(
             {
+            "screen_width": 500,
+            "screen_height": 500,
             "num_lanes": 3,
             "inner_lane_radius": 30,
             "vehicles_count": 5,

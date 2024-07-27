@@ -14,6 +14,7 @@ from DQN_Network import DQN_Network, Multi_DQN_Network
 import pandas as pd
 from copy import deepcopy
 from src.utils import calc_hypervolume
+from agent_display import InformationDisplay
 
 class MOMA_DQN:
     """ 
@@ -91,15 +92,12 @@ class MOMA_DQN:
         #initialise replay buffer: num_objectives * 2 because we want to store ego and social reward separately and +1 because we also store the number of close vehicles
         self.buffer = ReplayBuffer(self.rb_size, self.observation_space_length, (self.num_objectives*2 + 1), self.device, self.rng, importance_sampling=True)
 
-
-        #initialise reward logger
-        feature_names = ["episode"]
-        feature_names.extend(self.objective_names)
-        self.reward_logger = DataLogger("reward_logger",feature_names)
-
         #initialise scalarisation function
         self.scalarisation_method = scalarisation_method(*scalarisation_argument_list)
 
+
+        #display additional information during rendering
+        self.info_display = InformationDisplay(self.env, self)
 
     def __create_network(self, num_observations, num_actions, num_objectives) -> Tuple[nn.Module, nn.Module]:
             #create one network for each objective
@@ -123,7 +121,7 @@ class MOMA_DQN:
                     "see_behind": True,
                     "vehicles_count": 8,
                     "type": "Kinematics",
-                    "features": ['presence', 'x', 'y', 'vx', 'vy', "lane_info"]
+                    "features": ['presence', 'x', 'y', 'vx', 'vy', "lat_off", "long_off"] #lane_info
                     }
             }
         }
@@ -141,11 +139,10 @@ class MOMA_DQN:
         self.env.unwrapped.configure(config_dict)
 
 
-    def train(self, num_episodes: int = 5_000, inv_optimisation_frequency: int = 1, inv_target_update_frequency: int = 5, 
+    def train(self, num_episodes: int = 5_000, inv_target_update_frequency: int = 10, 
                 gamma: float = 0.9, epsilon_start: float = 0.9, epsilon_end: float = 0, epsilon_end_time: float = 1, num_evaluations: int = 0, eval_seed: int = 11) :
         '''
-        Runs the training procedure for num_iterations iterations. The inv_optimisation_frequency specifies 
-        the number of iterations after which a weight update occurs.The inv_target_update_frequency specifies 
+        Runs the training procedure for num_iterations iterations. The inv_target_update_frequency specifies 
         the number of weight updates of the policy net, after which the target net weights are adjusted.
         Gamma is the discount factor for the rewards. Epsilon is the probability of a random action being selected during training.
         Its value is linearly reduced during the training procedure from epsilon_start to epsilon_end.
@@ -188,6 +185,9 @@ class MOMA_DQN:
                 v.objective_weights = self.objective_weights     
 
             while not (self.terminated or self.truncated):
+                self.env.render() #TODO: remove that line
+                self.env.viewer.set_agent_display(self.info_display.display_meta_information)
+
                 num_close_vehicles = None
                 if self.use_multi_dqn:
                     num_close_vehicles = MOMA_DQN.__get_num_close_vehicles(info["vehicle_objective_weights"])
@@ -212,11 +212,11 @@ class MOMA_DQN:
                 
                 #use next_obs as obs during the next iteration
                 self.obs = self.next_obs
-            #update the weights every optimisation_frequency steps and only once the replay buffer is filled
-            if ((episode_nr % inv_optimisation_frequency) == 0) and (self.buffer.num_elements == self.rb_size):
-
-                self.update_weights_func(episode_nr, num_of_conducted_optimisation_steps, inv_target_update_frequency)
-                num_of_conducted_optimisation_steps += 1
+                #TODO: this is indented so that weights are updated every iteration instead of every episode
+                #update the weights every optimisation_frequency steps and only once the replay buffer is filled
+                if (self.buffer.num_elements == self.rb_size):
+                    self.update_weights_func(episode_nr, num_of_conducted_optimisation_steps, inv_target_update_frequency)
+                    num_of_conducted_optimisation_steps += 1
                 
             #run evaluation
             if (num_evaluations != 0) and (episode_nr % eval_interval == 0):
@@ -226,7 +226,9 @@ class MOMA_DQN:
 
             #update logger, reduce epsilon
             self.reduce_epsilon(max_eps_iteration, epsilon_start, epsilon_end) #linearly reduce the value of epsilon
-            self.reward_logger.add(episode_nr, *list(accumulated_rewards))
+
+        # copy the network weights to the target net one last time
+        self.target_net.load_state_dict(self.policy_net.state_dict())
 
         #prepare logger data
         df = self.loss_logger.to_dataframe()
@@ -350,8 +352,6 @@ class MOMA_DQN:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
 
 
-
-    #TODO: implement this function. ego and social network weights are updated independently of each other
     def __update_weights_multi_DQN(self, current_iteration, current_optimisation_iteration, inv_target_update_frequency):
         self.policy_net.train()
         #fetch samples from replay buffer
@@ -593,6 +593,10 @@ class MOMA_DQN:
 
     def store_network(self, model_path: str, model_name: str):
         torch.save(self.policy_net, f"{model_path}{model_name}")
+    
+    def load_network(self, model_path: str):
+        self.policy_net = torch.load(model_path)
+        self.target_net = torch.load(model_path)
 
     def load_network_weights(self, model_path: str):
         self.policy_net.load_state_dict(torch.load(model_path))

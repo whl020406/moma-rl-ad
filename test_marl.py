@@ -9,8 +9,8 @@ import torch
 
 env = mo_gym.make('moma-highway-env-v0', render_mode='rgb_array')
 env.unwrapped.configure({
-    "screen_width": 500,
-    "screen_height": 500,
+    "screen_width": 700,
+    "screen_height": 400,
     "vehicles_count": 10,
     "controlled_vehicles": 2,
     "observation": {

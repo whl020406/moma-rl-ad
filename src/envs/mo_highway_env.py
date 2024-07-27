@@ -20,6 +20,8 @@ class MOHighwayEnv(HighwayEnvFast):
     def default_config(cls) -> dict:
         config = super().default_config()
         config.update({
+            "screen_width": 800,
+            "screen_height": 500,
             "observation": {
                 "type": "Kinematics"
             },

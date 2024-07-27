@@ -182,6 +182,7 @@ class MO_DQN:
         return df
 
     def __update_weights(self, current_iteration, current_optimisation_iteration, inv_target_update_frequency):
+        self.policy_net.train()
         #update normal network each time the function is called
         #update target network every k steps
 
@@ -248,7 +249,7 @@ class MO_DQN:
 
         return action
     
-    def evaluate(self, num_repetitions: int = 5, num_points: int = 66, hv_reference_point: np.ndarray = None, seed: int = None, episode_recording_interval: int = None, render_episodes: bool = False):
+    def evaluate(self, num_repetitions: int = 5, num_points: int = 66, hv_reference_point: np.ndarray = None, seed: int = None, episode_recording_interval: int = None, render_episodes: bool = False, video_name_prefix = None, video_location = None):
         """ Evaluates the performance of the trained network by conducting num_repetitions episodes for each objective weights tuple. 
             the parameter num_points determines how many points in the objective-weight space are being explored. These weights
             are spaced equally according to the pymoo implementation: https://pymoo.org/misc/reference_directions.html.
