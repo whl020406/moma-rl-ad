@@ -14,8 +14,7 @@ from highway_env.envs.common.action import action_factory
 from highway_env.utils import near_split
 import torch
 from utils import random_objective_weights
-
-
+from highway_env.vehicle.behavior import IDMVehicle, LinearVehicle
 
 Observation = TypeVar("Observation")
 
@@ -42,14 +41,14 @@ class MOMACircleEnv(CircleEnv):
             "normalize_reward": True,
             "energy_consumption_function": NaiveEnergyCalculation,
 
-            "max_speed" : 10,
-            "min_speed" : 2,
+            "max_speed" : 15,
+            "min_speed" : 5,
             "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"), #uses GPU if possible
             "rng": np.random.default_rng(None), #sets random seed for rng by default
             "ego_spacing": 2,
             "vehicles_density": 1,
             })
-        config["action"] = {"type": "DiscreteMetaAction", "target_speeds": np.linspace(config["min_speed"], config["max_speed"], endpoint=True, num=5), "lateral":True}
+        config["action"] = {"type": "DiscreteMetaAction", "target_speeds": np.linspace(config["min_speed"], config["max_speed"], endpoint=True, num=6), "lateral":True}
         return config
     
     def _reward(self, action) -> float:
@@ -167,20 +166,32 @@ class MOMACircleEnv(CircleEnv):
 
 
     def _make_vehicles(self) -> None:
+        lane_length = self.road.network.graph[0][1][0].length * 3 # three implicit road sections, each accounting for 120 degrees
+
+        num_vehicles = self.config["vehicles_count"]
+        num_controlled_vehicles = self.config["controlled_vehicles"]
+        vehicle_spacing = lane_length / num_vehicles
+
+        placed_vehicles = 0
+
         """Create some new random vehicles of a given type, and add them on the road."""
         other_vehicles_type = utils.class_from_path(self.config["other_vehicles_type"])
-        other_per_controlled = near_split(self.config["vehicles_count"], num_bins=self.config["controlled_vehicles"])
+        other_per_controlled = near_split(num_vehicles, num_bins=num_controlled_vehicles)
 
         self.controlled_vehicles = []
-        
+        lane_counter = np.zeros(len(self.road.network.graph.keys()), dtype=int)
         for others in other_per_controlled:
+
             #controlled vehicle
-            vehicle = Vehicle.create_random(
-                self.road,
-                speed=None,
-                lane_id=None, #self.config["initial_lane_id"],
-                spacing=self.config["ego_spacing"]
+            vehicle = MOMACircleEnv.create_at(
+                 Vehicle,
+                 self.road,
+                 speed=None,
+                 lane_from=0,
+                 position=vehicle_spacing * placed_vehicles
             )
+            placed_vehicles += 1
+
             vehicle = self.action_type.vehicle_class(self.road, vehicle.position, vehicle.heading, vehicle.speed)
             vehicle.is_controlled = 1
             #set random objective weights for controlled vehicles (2-objectives)
@@ -195,7 +206,18 @@ class MOMACircleEnv(CircleEnv):
 
             #uncontrolled vehicles (non-autonomous)
             for _ in range(others):
-                vehicle = other_vehicles_type.create_random(self.road, spacing=1 / self.config["vehicles_density"])
+                chosen_lane = np.argmin(lane_counter)
+                lane_counter[chosen_lane] += 1
+
+                vehicle = MOMACircleEnv.create_at(
+                other_vehicles_type,
+                self.road,
+                speed=None,
+                lane_from=0,
+                position=vehicle_spacing * placed_vehicles
+                )
+                placed_vehicles += 1
+                
                 vehicle.randomize_behavior()
                 vehicle.is_controlled = 0
 
@@ -204,3 +226,39 @@ class MOMACircleEnv(CircleEnv):
                 vehicle.MIN_SPEED = self.config["min_speed"]
                 vehicle.objective_weights = torch.tensor([0.0,0.0], device=self.config["device"])
                 self.road.vehicles.append(vehicle)
+
+    def create_at(cls, road: Road,
+                      speed: float = None,
+                      lane_from: Optional[str] = None,
+                      lane_to: Optional[str] = None,
+                      lane_id: Optional[int] = None,
+                      position: float = None) \
+            -> "Vehicle":
+        """
+        Create a random vehicle on the road.
+
+        The lane and /or speed are chosen randomly, while longitudinal position is chosen behind the last
+        vehicle in the road with density based on the number of lanes.
+
+        :param road: the road where the vehicle is driving
+        :param speed: initial speed in [m/s]. If None, will be chosen randomly
+        :param lane_from: start node of the lane to spawn in
+        :param lane_to: end node of the lane to spawn in
+        :param lane_id: id of the lane to spawn in
+        :param spacing: ratio of spacing to the front vehicle, 1 being the default
+        :return: A vehicle with random position and/or speed
+        """
+        DISTANCE_WANTED_RANGE = [1,10]
+        _from = lane_from or road.np_random.choice(list(road.network.graph.keys()))
+        _to = lane_to or road.np_random.choice(list(road.network.graph[_from].keys()))
+        _id = lane_id if lane_id is not None else road.np_random.choice(len(road.network.graph[_from][_to]))
+        lane = road.network.get_lane((_from, _to, _id))
+        if speed is None:
+            if lane.speed_limit is not None:
+                speed = road.np_random.uniform(0.5*lane.speed_limit, 0.9*lane.speed_limit)
+            else:
+                speed = road.np_random.uniform(Vehicle.DEFAULT_INITIAL_SPEEDS[0], Vehicle.DEFAULT_INITIAL_SPEEDS[1])
+        v = cls(road, lane.position(position, 0), lane.heading_at(position), speed)
+        if cls == IDMVehicle:
+            v.DISTANCE_WANTED = np.random.rand() * (DISTANCE_WANTED_RANGE[1] - DISTANCE_WANTED_RANGE[0]) + DISTANCE_WANTED_RANGE[0]
+        return v

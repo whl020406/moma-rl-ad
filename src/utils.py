@@ -3,7 +3,12 @@ import numpy as np
 from collections import namedtuple
 from pymoo.indicators.hv import HV
 import pandas as pd
-from typing import List
+from typing import List, TypeVar
+import gymnasium as gym
+from gymnasium.wrappers.normalize import RunningMeanStd
+
+ObsType = TypeVar("ObsType")
+ActType = TypeVar("ActType")
 
 class ChebyshevScalarisation:
     """ This class computes the chebyshev scalarisation for a vectorial Q-value and corresponding utopian point z*

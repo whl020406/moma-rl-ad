@@ -3,12 +3,12 @@ import mo_gymnasium as mo_gym
 from matplotlib import pyplot as plt
 import numpy as np
 from src import __init__ #initialises important packages / environments
-from src.utils import AugmentedMultiAgentObservation
+from src.observations import AugmentedMultiAgentObservation
 from mo_gymnasium import MONormalizeReward
 from highway_env.road.lane import StraightLane
 from highway_env.envs.common.observation import OccupancyGridObservation
 
-env = gym.make('mo-highway-env-v0', render_mode='rgb_array')
+env = gym.make('moma-circle-env-v0', render_mode='rgb_array')
 env.unwrapped.configure({
     "screen_width": 500,
     "fps": 20,
@@ -42,7 +42,7 @@ done = False
 truncated = False
 while True:
     obs, reward, done, truncated, info = env.step(1)
-    print(obs[0][0])
+    print(reward[0][0])
     env.render()
 
 plt.imshow(env.render())

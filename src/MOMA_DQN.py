@@ -27,13 +27,14 @@ class MOMA_DQN:
     OBSERVATION_SPACE_LIST = ["Kinematics", "OccupancyGrid"]
 
     def __init__(self, env: gym.Env | None, device: device = None, seed: int | None = None, 
-        num_objectives: int = 2, num_actions: int = 5, 
-        replay_enabled: bool = True, replay_buffer_size: int = 1000, batch_ratio: float = 0.2, 
+        num_objectives: int = 2, num_actions: int = 5,
+        replay_enabled: bool = True, replay_buffer_size: int = 10_000, batch_size: float = 100, 
         objective_weights: Sequence[float] = None, loss_criterion: _Loss = nn.SmoothL1Loss, 
         objective_names: List[str] = ["speed_reward", "energy_reward"], scalarisation_method = LinearScalarisation, 
         scalarisation_argument_list: List = [], reward_structure: str = "mean_reward", 
         use_double_q_learning: bool = True, observation_space_name: str = "Kinematics",
-        use_multi_dqn: bool = False) -> None:
+        use_multi_dqn: bool = False,
+        gamma: float = 0.99) -> None:
         
         if objective_names is None:
             objective_names = [f"reward_{x}" for x in range(num_objectives)]
@@ -42,7 +43,9 @@ class MOMA_DQN:
         assert not (use_multi_dqn and (reward_structure == "ego_reward")), "Can't use multi dqn in conjunction with ego reward!"
         self.objective_names = objective_names
         self.reward_structure = reward_structure
+
         self.env = env
+        self.gamma = gamma
         self.num_controlled_vehicles = len(self.env.unwrapped.controlled_vehicles)
         self.use_double_q_learning = use_double_q_learning
         self.rng = np.random.default_rng(seed)
@@ -60,10 +63,10 @@ class MOMA_DQN:
             self.objective_weights = random_objective_weights(self.num_objectives, self.rng, self.device)
 
         self.num_actions = num_actions
-
+        
         #set proper observation space
         self.__configure_observation_space(observation_space_name, self.reward_structure)
-        
+
         #determine observation space length
         obs, _ = self.env.reset()
         obs = torch.tensor(obs[0], device=self.device) #reshape observations and
@@ -86,7 +89,7 @@ class MOMA_DQN:
 
         self.replay_enabled = replay_enabled
         self.rb_size = replay_buffer_size
-        self.batch_ratio = batch_ratio
+        self.batch_size= batch_size
         self.loss_criterion = loss_criterion
 
         #initialise replay buffer: num_objectives * 2 because we want to store ego and social reward separately and +1 because we also store the number of close vehicles
@@ -95,9 +98,6 @@ class MOMA_DQN:
         #initialise scalarisation function
         self.scalarisation_method = scalarisation_method(*scalarisation_argument_list)
 
-
-        #display additional information during rendering
-        self.info_display = InformationDisplay(self.env, self)
 
     def __create_network(self, num_observations, num_actions, num_objectives) -> Tuple[nn.Module, nn.Module]:
             #create one network for each objective
@@ -121,7 +121,7 @@ class MOMA_DQN:
                     "see_behind": True,
                     "vehicles_count": 8,
                     "type": "Kinematics",
-                    "features": ['presence', 'x', 'y', 'vx', 'vy', "lat_off", "long_off"] #lane_info
+                    "features": ['presence', 'x', 'y', 'vx', 'vy', 'lane_info']
                     }
             }
         }
@@ -139,8 +139,8 @@ class MOMA_DQN:
         self.env.unwrapped.configure(config_dict)
 
 
-    def train(self, num_episodes: int = 5_000, inv_target_update_frequency: int = 10, 
-                gamma: float = 0.9, epsilon_start: float = 0.9, epsilon_end: float = 0, epsilon_end_time: float = 1, num_evaluations: int = 0, eval_seed: int = 11) :
+    def train(self, num_episodes: int = 5_000, inv_target_update_frequency: int = 20, 
+              epsilon_start: float = 0.9, epsilon_end: float = 0, epsilon_end_time: float = 1, num_evaluations: int = 0, eval_seed: int = 11) :
         '''
         Runs the training procedure for num_iterations iterations. The inv_target_update_frequency specifies 
         the number of weight updates of the policy net, after which the target net weights are adjusted.
@@ -160,7 +160,6 @@ class MOMA_DQN:
         feature_names = ["episode", "hypervolume"]
         hv_logger = DataLogger("hv_logger", feature_names)
 
-        self.gamma = gamma
         self.epsilon = epsilon_start
         self.optimiser = torch.optim.AdamW(self.policy_net.parameters(), lr=1e-4, amsgrad=True)
 
@@ -171,13 +170,16 @@ class MOMA_DQN:
 
         #training loop
         for episode_nr in trange(num_episodes, desc="Training episodes", mininterval=2, position=3):
+            #reset auxiliary variables for loss logger
+            weight_update_counter = 0
+            acc_loss = 0
+
             #reset environment
             self.terminated = False
             self.truncated = False
             self.obs, info = self.env.reset()
             self.obs = [torch.tensor(single_obs, device=self.device) for single_obs in self.obs] #reshape observations and
             self.obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.obs] #remove nan values
-            accumulated_rewards = np.zeros(self.num_objectives)
 
             # currently every controlled vehicle has the same objective weights
             self.objective_weights = random_objective_weights(self.num_objectives, self.rng, self.device)
@@ -185,10 +187,8 @@ class MOMA_DQN:
                 v.objective_weights = self.objective_weights     
 
             while not (self.terminated or self.truncated):
-                self.env.render() #TODO: remove that line
-                self.env.viewer.set_agent_display(self.info_display.display_meta_information)
-
                 num_close_vehicles = None
+                #self.env.render() #TODO: remove that line
                 if self.use_multi_dqn:
                     num_close_vehicles = MOMA_DQN.__get_num_close_vehicles(info["vehicle_objective_weights"])
                 self.actions = self.act(self.obs, eps_greedy=True, num_close_vehicles=num_close_vehicles)
@@ -214,9 +214,14 @@ class MOMA_DQN:
                 self.obs = self.next_obs
                 #TODO: this is indented so that weights are updated every iteration instead of every episode
                 #update the weights every optimisation_frequency steps and only once the replay buffer is filled
-                if (self.buffer.num_elements == self.rb_size):
-                    self.update_weights_func(episode_nr, num_of_conducted_optimisation_steps, inv_target_update_frequency)
+                if (self.buffer.num_elements >= self.batch_size):
+                    loss = self.update_weights_func(episode_nr, num_of_conducted_optimisation_steps, inv_target_update_frequency)
+                    acc_loss += loss
                     num_of_conducted_optimisation_steps += 1
+                    weight_update_counter += 1
+            
+            if weight_update_counter != 0:
+                self.loss_logger.add(episode= episode_nr, loss=acc_loss / weight_update_counter)
                 
             #run evaluation
             if (num_evaluations != 0) and (episode_nr % eval_interval == 0):
@@ -291,7 +296,7 @@ class MOMA_DQN:
     def __update_weights_single_DQN(self, current_iteration, current_optimisation_iteration, inv_target_update_frequency):
         self.policy_net.train()
         #fetch samples from replay buffer
-        batch_samples = self.buffer.sample(round(self.buffer.num_elements*self.batch_ratio))
+        batch_samples = self.buffer.sample(self.batch_size)
         observations = self.buffer.get_observations(batch_samples)
         next_obs = self.buffer.get_next_obs(batch_samples)
         actions = self.buffer.get_actions(batch_samples)
@@ -338,8 +343,6 @@ class MOMA_DQN:
 
         #compute loss between estimates and actual values
         loss = self.loss_func(state_action_values, exp_state_action_values)
-        #store loss in loss logger
-        self.loss_logger.add(episode=current_iteration, loss=loss.item())
 
         #backpropagate loss
         self.optimiser.zero_grad()
@@ -351,11 +354,12 @@ class MOMA_DQN:
         if (current_optimisation_iteration % inv_target_update_frequency) == 0:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
 
+        return loss.item()
 
     def __update_weights_multi_DQN(self, current_iteration, current_optimisation_iteration, inv_target_update_frequency):
         self.policy_net.train()
         #fetch samples from replay buffer
-        batch_samples = self.buffer.sample(round(self.buffer.num_elements*self.batch_ratio))
+        batch_samples = self.buffer.sample(self.batch_size)
         observations = self.buffer.get_observations(batch_samples)
         next_obs = self.buffer.get_next_obs(batch_samples)
         actions = self.buffer.get_actions(batch_samples)
@@ -400,8 +404,6 @@ class MOMA_DQN:
 
         #compute loss between estimates and actual values
         loss = self.loss_func(state_action_values, exp_state_action_values)
-        #store loss in loss logger
-        self.loss_logger.add(episode=current_iteration, loss=loss.item())
 
         #backpropagate loss
         self.optimiser.zero_grad()
@@ -413,12 +415,13 @@ class MOMA_DQN:
         if (current_optimisation_iteration % inv_target_update_frequency) == 0:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
 
-
+        return loss.item()
+    
     def __act_single_DQN(self, obs, eps_greedy: bool = False, num_close_vehicles: List[int] = None):
         '''select a list of actions, one element for each autonomously controlled agent.
         num_close_vehicles parameter was added to create a uniform function header irrespective of used network structure'''
         joint_action = []
-        for single_obs in obs:
+        for i, single_obs in enumerate(obs):
             r = self.rng.random()
             action = None
 
@@ -430,6 +433,11 @@ class MOMA_DQN:
                     q_values = q_values.reshape(self.num_objectives, self.num_actions)
                     scalarised_values = self.scalarisation_method.scalarise_actions(q_values, self.objective_weights)
                     action = torch.argmax(scalarised_values).item()
+                    
+                    #attributes for information display for observer vehicle
+                    if i == 0:
+                        self.action_utility_values = scalarised_values.cpu().numpy()
+                        self.action_q_values = q_values.cpu().numpy()
 
             else: # choose random action
                 action = self.rng.choice(self.num_actions)
@@ -467,6 +475,10 @@ class MOMA_DQN:
                     scalarised_values = (scalarised_ego_values + (scalarised_mean_social_values * num_close_vehicles[i])) / num_close_vehicles[i] + 1
                     action = torch.argmax(scalarised_values).item()
 
+                    #attributes for information display for observer vehicle
+                    if i == 0:
+                        self.action_utility_values = scalarised_values.cpu().numpy()
+
             else: # choose random action
                 action = self.rng.choice(self.num_actions)
 
@@ -483,14 +495,20 @@ class MOMA_DQN:
             to obtain a less biased result.
             The hv_reference_point is a vector specifying the best possible vectorial reward vector."""
         
-        self.eval_env = deepcopy(self.env) #TODO: test whether deepcopy works
+        self.eval_env = deepcopy(self.env)
         self.eval_env.unwrapped.configure({"rng": self.rng})
 
-        #TODO: change render function to include additional information
+        if (episode_recording_interval is not None) or render_episodes:
+            self.eval_env.reset()
+            self.eval_env.render()
+            #display additional information during rendering
+            info_display = InformationDisplay(self.eval_env, self)
+            self.eval_env.viewer.set_agent_display(info_display.display_meta_information)
+
         if episode_recording_interval is not None:
             self.eval_env = RecordVideoV0(self.eval_env, video_folder= video_location, name_prefix= video_name_prefix, 
-                                                episode_trigger=lambda x: x % episode_recording_interval == 0, fps=30)
-        
+                                                episode_trigger=lambda x: x % episode_recording_interval == 0, fps=10)
+
         self.rng = np.random.default_rng(seed)
         #get equally spaced objective weights
         objective_weights = get_reference_directions("energy", n_dim = self.num_objectives, n_points = num_points, seed=seed)

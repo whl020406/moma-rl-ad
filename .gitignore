@@ -1,2 +1,5 @@
 **/__pycache__/**
 **/videos/**
+test*/**
+data/**
+*.mp4

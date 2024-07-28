@@ -85,12 +85,16 @@ class CircleEnv(AbstractEnv):
 
         for lane_id in range(self.num_lanes):
 
-            network.add_lane("a","b", CircularLane(
-                [0,0], radii[lane_id], start_phase=np.deg2rad(0), end_phase=np.deg2rad(179), line_types=lane_stripes[lane_id], speed_limit=self.config["max_speed"], width=lane_width
+            network.add_lane(0,1, CircularLane(
+                [0,0], radii[lane_id], start_phase=np.deg2rad(0), end_phase=np.deg2rad(120), line_types=lane_stripes[lane_id], speed_limit=self.config["max_speed"], width=lane_width
             ))
             
-            network.add_lane("b","a", CircularLane(
-                [0,0], radii[lane_id], start_phase=np.deg2rad(180), end_phase=np.deg2rad(359), line_types=lane_stripes[lane_id], speed_limit=self.config["max_speed"], width=lane_width
+            network.add_lane(1,0, CircularLane(
+                [0,0], radii[lane_id], start_phase=np.deg2rad(120), end_phase=np.deg2rad(240), line_types=lane_stripes[lane_id], speed_limit=self.config["max_speed"], width=lane_width
+            ))
+
+            network.add_lane(2,3, CircularLane(
+                [0,0], radii[lane_id], start_phase=np.deg2rad(240), end_phase=np.deg2rad(360), line_types=lane_stripes[lane_id], speed_limit=self.config["max_speed"], width=lane_width
             ))
 
         road = Road(network, np_random= self.np_random, record_history=self.config["show_trajectories"])

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 class DQN_Network(nn.Module):
 
-    def __init__(self, n_observations, n_actions, n_objectives, hidden_sizes = [256,256]):
+    def __init__(self, n_observations, n_actions, n_objectives, hidden_sizes = [128, 128]):
         super(DQN_Network, self).__init__()
         h1_input = hidden_sizes[0]
         h_last_out = hidden_sizes[-1]
