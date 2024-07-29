@@ -30,7 +30,10 @@ class MOMAHighwayEnv(HighwayEnvFast):
                 "type": "Kinematics"
             },
             "action": {
-                "type": "DiscreteMetaAction",
+                "type": "MultiAgentAction",
+                "action_config": {
+                    "type": "DiscreteMetaAction",
+                }
             },
             "lanes_count": 4,
             "vehicles_count": 10,
@@ -46,13 +49,14 @@ class MOMAHighwayEnv(HighwayEnvFast):
                                        # lower speeds according to config["reward_speed_range"].
             "lane_change_reward": 0,   # The reward received at each lane change action.
             "energy_consumption_reward": 1,
-            "reward_speed_range": [20, 30],
+            "reward_speed_range": [15, 30],
             "normalize_reward": True,
             "offroad_terminal": False,
             "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"), #uses GPU if possible
             "energy_consumption_function": NaiveEnergyCalculation,
             "rng": np.random.default_rng(None) #sets random seed for rng by default
         })
+        config["action"]["action_config"]["target_speeds"] = np.linspace(config["reward_speed_range"][0], config["reward_speed_range"][1], endpoint=True, num=7)
         return config
 
     def _reward(self, action: Action) -> float:

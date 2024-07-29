@@ -20,12 +20,6 @@ env.unwrapped.configure({
             "see_behind": False,
         }
     },
-    "action": {
-        "type": "MultiAgentAction",
-        "action_config": {
-            "type": "DiscreteMetaAction",
-        }
-    }
 })
 
 obs, info = env.reset()
