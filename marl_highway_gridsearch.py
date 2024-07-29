@@ -7,33 +7,40 @@ import pandas as pd
 import numpy as np
 
 #final environment config used for experiments
-env_config = {
-    "screen_width": 500,
-    "screen_height": 500,
+env_config_1 = {
+    "screen_width": 700,
+    "screen_height": 400,
     "vehicles_count": 18,
     "controlled_vehicles": 2,
+}
 
-    "action": {
-        "type": "MultiAgentAction",
-        "action_config": {
-            "type": "DiscreteMetaAction",
-        }
-    }
+env_config_2 = {
+    "screen_width": 700,
+    "screen_height": 400,
+    "vehicles_count": 12,
+    "controlled_vehicles": 8,
+}
+
+env_config_3 = {
+    "screen_width": 700,
+    "screen_height": 400,
+    "vehicles_count": 6,
+    "controlled_vehicles": 14,
 }
 
 run_config = {
-    "env":  [env_config],
+    "env":  [env_config_1, env_config_2, env_config_3],
 
     "init": {
          "replay_buffer_size": [10_000],
          "batch_size" : [100],
          "reward_structure" : ["ego_reward", "mean_reward"],
          "use_multi_dqn" : [False,True],
-         "observation_space_name" : ["Kinematics", "OccupancyGrid"],
+         "observation_space_name" : ["OccupancyGrid"],
     },
     "train": {
          "gamma": 0.99,
-         "num_episodes" : 3000,
+         "num_episodes" : 2000,
          "inv_target_update_frequency": 10,
          "epsilon_start": 0.9,
          "epsilon_end": 0.1,
