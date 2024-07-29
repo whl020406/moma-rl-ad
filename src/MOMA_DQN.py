@@ -167,7 +167,7 @@ class MOMA_DQN:
         self.loss_logger = DataLogger("loss_logger",feature_names)
 
         #initialise hv_logger
-        feature_names = ["episode", "hypervolume"]
+        feature_names = ["episode", "hypervolume", "avg_num_iterations_training", "std_num_iterations_training"]
         hv_logger = DataLogger("hv_logger", feature_names)
 
         self.epsilon = epsilon_start
@@ -237,9 +237,11 @@ class MOMA_DQN:
                 
             #run evaluation
             if (num_evaluations != 0) and (episode_nr % eval_interval == 0):
-                _,_, hv = self.evaluate(num_repetitions= 5, num_points= 10, hv_reference_point=np.array([0,0]),
+                summary_log_df,_, hv = self.evaluate(num_repetitions= 5, num_points= 10, hv_reference_point=np.array([0,0]),
                                         seed = eval_seed)
-                hv_logger.add(episode=episode_nr, hypervolume=hv)
+                mean_num_iters = summary_log_df["num_iterations"].mean()
+                std_num_iters = summary_log_df["num_iterations"].std()
+                hv_logger.add(episode=episode_nr, hypervolume=hv, avg_num_iterations_training = mean_num_iters, std_num_iterations_training= std_num_iters)
 
             #update logger, reduce epsilon
             self.reduce_epsilon(max_eps_iteration, epsilon_start, epsilon_end) #linearly reduce the value of epsilon
@@ -256,7 +258,13 @@ class MOMA_DQN:
         if num_evaluations != 0:
             hv_df = hv_logger.to_dataframe()
             df["hypervolume"] = np.nan
-            df.loc[df.index.isin(hv_df["episode"]),"hypervolume"] = hv_df["hypervolume"].to_numpy()
+            df["avg_num_iterations_training"]
+            df["std_num_iterations_training"]
+
+            indices = df.index.isin(hv_df["episode"])
+            df.loc[indices,"hypervolume"] = hv_df["hypervolume"].to_numpy()
+            df.loc[indices,"avg_num_iterations_training"] = hv_df["avg_num_iterations_training"].to_numpy()
+            df.loc[indices,"std_num_iterations_training"] = hv_df["std_num_iterations_training"].to_numpy()
 
         return df
     
