@@ -4,7 +4,7 @@ import torch
 from torch import nn
 from torch import device
 import numpy as np
-from typing import Tuple, Sequence
+from typing import Tuple, Sequence, Dict
 from src.utils import ReplayBuffer, random_objective_weights, DataLogger, LinearScalarisation
 from torch.nn.modules.loss import _Loss
 from tqdm import trange
@@ -15,7 +15,6 @@ import pandas as pd
 from copy import deepcopy
 from src.utils import calc_hypervolume
 from agent_display import InformationDisplay
-
 class MOMA_DQN:
     """ 
     Implements multi-objective multi-agent DQN by extending the code in MO_DQN.py
@@ -23,7 +22,12 @@ class MOMA_DQN:
     and sharing experiences using a shared replay buffer. The DQN network has access to the objective weights of other autonomous agents
     and uses a fixed weight of human agents.
     """
-    
+    SINGE_LANE_ACTION_MAPPING = {
+        0:1, # IDLE
+        1:3, # ACC 
+        2:4  # DESC
+    }
+
     OBSERVATION_SPACE_LIST = ["Kinematics", "OccupancyGrid"]
 
     def __init__(self, env: gym.Env | None, device: device = None, seed: int | None = None, 
@@ -35,6 +39,12 @@ class MOMA_DQN:
         use_double_q_learning: bool = True, observation_space_name: str = "Kinematics",
         use_multi_dqn: bool = False,
         gamma: float = 0.99) -> None:
+        
+        #use only idle, acc and desc if there is only one lane
+        self.use_action_mapping = False
+        if env.unwrapped.config["lanes_count"] == 1:
+            self.use_action_mapping = True
+            num_actions = 3
         
         if objective_names is None:
             objective_names = [f"reward_{x}" for x in range(num_objectives)]
@@ -192,6 +202,8 @@ class MOMA_DQN:
                 if self.use_multi_dqn:
                     num_close_vehicles = MOMA_DQN.__get_num_close_vehicles(info["vehicle_objective_weights"])
                 self.actions = self.act(self.obs, eps_greedy=True, num_close_vehicles=num_close_vehicles)
+                if self.use_action_mapping:
+                    self.actions = (MOMA_DQN.SINGE_LANE_ACTION_MAPPING[action] for action in self.actions)
                 (
                     self.next_obs,
                     self.rewards,
@@ -553,6 +565,8 @@ class MOMA_DQN:
                     if self.use_multi_dqn:
                         num_close_vehicles = MOMA_DQN.__get_num_close_vehicles(info["vehicle_objective_weights"])
                     self.action = self.act(self.obs, eps_greedy=False, num_close_vehicles=num_close_vehicles)
+                    if self.use_action_mapping:
+                        self.actions = (MOMA_DQN.SINGE_LANE_ACTION_MAPPING[action] for action in self.actions)
                     (
                     self.obs,
                     self.reward,

@@ -24,7 +24,7 @@ class CircleEnv(AbstractEnv):
             "fixed_centering_position":np.array([0,10])
             })
         config["inner_lane_radius"] = 30
-        config["num_lanes"] = 3
+        config["lanes_count"] = 3
         config["vehicles_count"] = 8
         config["controlled_vehicles"] = 1
         config["vehicles_density"] = 1
@@ -75,7 +75,7 @@ class CircleEnv(AbstractEnv):
         '''
         lane_width = self.config["lane_width"]
         self.inner_lane_radius = self.config["inner_lane_radius"]
-        self.num_lanes = self.config["num_lanes"]
+        self.num_lanes = self.config["lanes_count"]
         network = RoadNetwork()
         radii = np.arange(start=self.inner_lane_radius, step=lane_width, stop=self.inner_lane_radius+lane_width*self.num_lanes)[::-1] #get radius for every lane
         #set line striping

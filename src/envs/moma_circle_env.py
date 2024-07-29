@@ -94,7 +94,7 @@ class MOMACircleEnv(CircleEnv):
                         "high_speed_reward": np.clip(scaled_speed, 0, 1),
                         "energy_consumption_reward": self.energy_consumption_function.compute_efficiency(vehicle, normalise=self.config["normalize_reward"]),
                         #"lane_change_reward": action in [0, 2],
-                        "right_lane_reward":  1 - (lane / max(len(neighbours) - 1, 1)), # 1 - so that the outer lane receives the highest reward
+                        #"right_lane_reward":  1 - (lane / max(len(neighbours) - 1, 1)), # 1 - so that the outer lane receives the highest reward
 
                     }
                     dict_list.append(dict)
@@ -108,8 +108,8 @@ class MOMACircleEnv(CircleEnv):
         scalarised_rewards = {
             name: self.config.get(name, 0) * reward for name, reward in rewards.items()
         }
-        speed_reward = scalarised_rewards["high_speed_reward"] + scalarised_rewards["right_lane_reward"]
-        energy_reward = scalarised_rewards["energy_consumption_reward"] + scalarised_rewards["right_lane_reward"]
+        speed_reward = scalarised_rewards["high_speed_reward"] #+ scalarised_rewards["right_lane_reward"]
+        energy_reward = scalarised_rewards["energy_consumption_reward"] #+ scalarised_rewards["right_lane_reward"]
         
         if self.config["normalize_reward"]:
             speed_reward, energy_reward = self.__normalize_rewards([speed_reward, energy_reward])
@@ -127,12 +127,12 @@ class MOMACircleEnv(CircleEnv):
 
         speed_reward = utils.lmap(speed_reward,
                                 [0,
-                                    self.config["high_speed_reward"] + self.config["right_lane_reward"]],
+                                    self.config["high_speed_reward"]],# + self.config["right_lane_reward"]],
                                 [0, 1])
         
         energy_reward = utils.lmap(energy_reward,
                                 [0,
-                                    self.config["energy_consumption_reward"] + self.config["right_lane_reward"]],
+                                    self.config["energy_consumption_reward"]],# + self.config["right_lane_reward"]],
                                 [0, 1])
         
         return speed_reward, energy_reward
