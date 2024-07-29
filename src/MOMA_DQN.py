@@ -37,8 +37,7 @@ class MOMA_DQN:
         objective_names: List[str] = ["speed_reward", "energy_reward"], scalarisation_method = LinearScalarisation, 
         scalarisation_argument_list: List = [], reward_structure: str = "mean_reward", 
         use_double_q_learning: bool = True, observation_space_name: str = "Kinematics",
-        use_multi_dqn: bool = False,
-        gamma: float = 0.99) -> None:
+        use_multi_dqn: bool = False) -> None:
         
         #use only idle, acc and desc if there is only one lane
         self.use_action_mapping = False
@@ -55,7 +54,6 @@ class MOMA_DQN:
         self.reward_structure = reward_structure
 
         self.env = env
-        self.gamma = gamma
         self.num_controlled_vehicles = len(self.env.unwrapped.controlled_vehicles)
         self.use_double_q_learning = use_double_q_learning
         self.rng = np.random.default_rng(seed)
@@ -149,7 +147,7 @@ class MOMA_DQN:
         self.env.unwrapped.configure(config_dict)
 
 
-    def train(self, num_episodes: int = 5_000, inv_target_update_frequency: int = 20, 
+    def train(self, num_episodes: int = 5_000, inv_target_update_frequency: int = 20, gamma: float = 0.99, 
               epsilon_start: float = 0.9, epsilon_end: float = 0, epsilon_end_time: float = 1, num_evaluations: int = 0, eval_seed: int = 11) :
         '''
         Runs the training procedure for num_iterations iterations. The inv_target_update_frequency specifies 
@@ -157,7 +155,7 @@ class MOMA_DQN:
         Gamma is the discount factor for the rewards. Epsilon is the probability of a random action being selected during training.
         Its value is linearly reduced during the training procedure from epsilon_start to epsilon_end.
         '''
-
+        self.gamma = gamma
         #compute evaluation interval
         if num_evaluations != 0:
             eval_interval = round(num_episodes/num_evaluations)
@@ -237,7 +235,7 @@ class MOMA_DQN:
                 
             #run evaluation
             if (num_evaluations != 0) and (episode_nr % eval_interval == 0):
-                summary_log_df,_, hv = self.evaluate(num_repetitions= 5, num_points= 10, hv_reference_point=np.array([0,0]),
+                summary_log_df,_, hv = self.evaluate(num_repetitions= 10, num_points= 10, hv_reference_point=np.array([0,0]),
                                         seed = eval_seed)
                 mean_num_iters = summary_log_df["num_iterations"].mean()
                 std_num_iters = summary_log_df["num_iterations"].std()

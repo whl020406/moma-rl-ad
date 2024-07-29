@@ -10,7 +10,7 @@ import numpy as np
 env_config = {
     "screen_width": 500,
     "screen_height": 500,
-    "vehicles_count": 10,
+    "vehicles_count": 18,
     "controlled_vehicles": 2,
 
     "action": {
@@ -21,56 +21,30 @@ env_config = {
     }
 }
 
-# run_config = {
-#     "env":  [env_config],
-
-#     "init": {
-#          "replay_buffer_size": [1000],
-#          "batch_ratio" : [0.2],
-#          "reward_structure" : ["ego_reward", "mean_reward"],
-#          "use_multi_dqn:" : [False,True],
-#          "observation_space_name" : ["Kinematics", "OccupancyGrid"],
-#     },
-#     "train": {
-#          "gamma": 0.9,
-#          "num_episodes" : 25_000,
-#          "inv_target_update_frequency": 10,
-#          "epsilon_start": 0.9,
-#          "epsilon_end": 0,
-#          "epsilon_end_time": 0.75,
-#     },
-#     "eval": {
-#         "num_repetitions": 20,
-#         "num_points": 20,
-#         "num_evaluations": 10,
-#     },
-# }
-
-#test run config for generating example data
 run_config = {
     "env":  [env_config],
 
     "init": {
-         "replay_buffer_size": [1000],
-         "batch_ratio" : [0.2],
+         "replay_buffer_size": [10_000],
+         "batch_size" : [100],
          "reward_structure" : ["ego_reward", "mean_reward"],
          "use_multi_dqn" : [False,True],
          "observation_space_name" : ["Kinematics", "OccupancyGrid"],
     },
     "train": {
-         "gamma": 0.9,
-         "num_episodes" : 5000,
+         "gamma": 0.99,
+         "num_episodes" : 3000,
          "inv_target_update_frequency": 10,
          "epsilon_start": 0.9,
-         "epsilon_end": 0,
+         "epsilon_end": 0.1,
          "epsilon_end_time": 0.75,
-         "num_evaluations": 2
+         "num_evaluations": 10,
     },
     "eval": {
-        "num_repetitions": 2,
-        "num_points": 3,
+        "num_repetitions": 20,
+        "num_points": 20,
     },
 }
 
 env = mo_gym.make('moma-highway-env-v0', render_mode='rgb_array')
-gridsearch(MOMA_DQN, env, run_config, 11, csv_file_path="data/moma_highway_test/", experiment_name="moma_highway")
+gridsearch(MOMA_DQN, env, run_config, seed=11, csv_file_path="data/moma_highway_test/", experiment_name="moma_highway")
