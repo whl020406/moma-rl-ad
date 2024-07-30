@@ -256,8 +256,8 @@ class MOMA_DQN:
         if num_evaluations != 0:
             hv_df = hv_logger.to_dataframe()
             df["hypervolume"] = np.nan
-            df["avg_num_iterations_training"]
-            df["std_num_iterations_training"]
+            df["avg_num_iterations_training"] = np.nan
+            df["std_num_iterations_training"] = np.nan
 
             indices = df.index.isin(hv_df["episode"])
             df.loc[indices,"hypervolume"] = hv_df["hypervolume"].to_numpy()
