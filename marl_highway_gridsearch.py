@@ -29,7 +29,7 @@ env_config_3 = {
 }
 
 run_config = {
-    "env":  [env_config_1, env_config_2, env_config_3],
+    "env":  [env_config_3],#[env_config_1, env_config_2, env_config_3],
 
     "init": {
          "replay_buffer_size": [10_000],
@@ -54,4 +54,4 @@ run_config = {
 }
 
 env = mo_gym.make('moma-highway-env-v0', render_mode='rgb_array')
-gridsearch(MOMA_DQN, env, run_config, seed=11, csv_file_path="data/moma_highway_test/", experiment_name="moma_highway")
+gridsearch(MOMA_DQN, env, run_config, seed=11, csv_file_path="data/moma_highway_test_final_3rd_config/", experiment_name="moma_highway_final_3rd_config")
