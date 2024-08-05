@@ -54,7 +54,8 @@ class MOMAHighwayEnv(HighwayEnvFast):
             "offroad_terminal": False,
             "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"), #uses GPU if possible
             "energy_consumption_function": NaiveEnergyCalculation,
-            "rng": np.random.default_rng(None) #sets random seed for rng by default
+            "rng": np.random.default_rng(None), #sets random seed for rng by default
+            "set_uncontrolled_obj_weights": False
         })
         config["action"]["action_config"]["target_speeds"] = np.linspace(config["reward_speed_range"][0], config["reward_speed_range"][1], endpoint=True, num=7)
         return config
@@ -180,8 +181,16 @@ class MOMAHighwayEnv(HighwayEnvFast):
                 #set weights of 0.0 for each objective for uncontrolled vehicles (2-objectives)
                 vehicle.MAX_SPEED = max_speed
                 vehicle.MIN_SPEED = min_speed
-                vehicle.objective_weights = torch.tensor([0.0,0.0], device=self.config["device"])
+                if self.config["set_uncontrolled_obj_weights"]:
+                    self.set_uncontrolled_vehicle_obj_weights(vehicle, min_speed, max_speed)
+                else:
+                    vehicle.objective_weights = torch.tensor([0.0,0.0], device=self.config["device"])
                 self.road.vehicles.append(vehicle)
+
+    def set_uncontrolled_vehicle_obj_weights(self, vehicle, min_speed, max_speed):
+        target_speed = vehicle.target_speed
+        speed_obj_weight = (target_speed - min_speed) / (max_speed - min_speed)
+        vehicle.objective_weights = torch.tensor([speed_obj_weight, 1 - speed_obj_weight], device=self.config["device"])
 
     def _info(self, obs: Observation, action: Optional[Action] = None) -> dict:
         """

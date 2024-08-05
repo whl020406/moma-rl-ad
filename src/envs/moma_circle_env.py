@@ -25,14 +25,22 @@ class MOMACircleEnv(CircleEnv):
         config = super().default_config()
         config.update(
             {
-            "screen_width": 500,
+            "action": {
+                "type": "MultiAgentAction",
+                "action_config": {
+                    "type": "DiscreteMetaAction",
+                },
+
+                "lateral":True
+            },
+            "screen_width": 501,
             "screen_height": 500,
-            "num_lanes": 3,
-            "inner_lane_radius": 30,
+            "lanes_count": 1,
+            "inner_lane_radius": 80,
             "vehicles_count": 5,
             "controlled_vehicles": 2,
             "vehicles_density" : 0.5,
-
+            "duration": 100,
             "collision_reward": -1,
             "high_speed_reward": 1,
             "lane_change_reward": -0.05,
@@ -41,14 +49,14 @@ class MOMACircleEnv(CircleEnv):
             "normalize_reward": True,
             "energy_consumption_function": NaiveEnergyCalculation,
 
-            "max_speed" : 15,
+            "max_speed" : 20,
             "min_speed" : 5,
             "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"), #uses GPU if possible
             "rng": np.random.default_rng(None), #sets random seed for rng by default
             "ego_spacing": 2,
             "vehicles_density": 1,
             })
-        config["action"] = {"type": "DiscreteMetaAction", "target_speeds": np.linspace(config["min_speed"], config["max_speed"], endpoint=True, num=6), "lateral":True}
+        config["action"]["action_config"]["target_speeds"] =  np.linspace(config["min_speed"], config["max_speed"], endpoint=True, num=7)
         return config
     
     def _reward(self, action) -> float:
@@ -170,7 +178,8 @@ class MOMACircleEnv(CircleEnv):
 
         num_vehicles = self.config["vehicles_count"]
         num_controlled_vehicles = self.config["controlled_vehicles"]
-        vehicle_spacing = lane_length / num_vehicles
+        total_vehicles = num_vehicles + num_controlled_vehicles
+        vehicle_spacing = lane_length / total_vehicles
 
         placed_vehicles = 0
 

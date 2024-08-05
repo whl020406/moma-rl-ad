@@ -27,6 +27,11 @@ class MOMA_DQN:
         1:3, # ACC 
         2:4  # DESC
     }
+    SINGLE_LANE_REVERSE_ACTION_MAPPING = {
+        1:0,
+        3:1,
+        4:2
+    }
 
     OBSERVATION_SPACE_LIST = ["Kinematics", "OccupancyGrid"]
 
@@ -37,8 +42,11 @@ class MOMA_DQN:
         objective_names: List[str] = ["speed_reward", "energy_reward"], scalarisation_method = LinearScalarisation, 
         scalarisation_argument_list: List = [], reward_structure: str = "mean_reward", 
         use_double_q_learning: bool = True, observation_space_name: str = "Kinematics",
-        use_multi_dqn: bool = False) -> None:
+        use_multi_dqn: bool = False, increase_ego_reward_importance: bool = False, estimate_uncontrolled_obj_weights: bool = False) -> None:
         
+        #for the mean reward, if this is set to true, place a 50% importance on the ego reward
+        self.increase_ego_reward_importance = increase_ego_reward_importance
+        self.estimate_uncontrolled_obj_weights = estimate_uncontrolled_obj_weights
         #use only idle, acc and desc if there is only one lane
         self.use_action_mapping = False
         if env.unwrapped.config["lanes_count"] == 1:
@@ -59,7 +67,7 @@ class MOMA_DQN:
         self.rng = np.random.default_rng(seed)
         torch.manual_seed(seed)
 
-        self.env.unwrapped.configure({"rng": self.rng})
+        self.env.unwrapped.configure({"rng": self.rng, "set_uncontrolled_obj_weights": self.estimate_uncontrolled_obj_weights})
 
         self.device = device
         if self.device is None:
@@ -201,7 +209,7 @@ class MOMA_DQN:
                     num_close_vehicles = MOMA_DQN.__get_num_close_vehicles(info["vehicle_objective_weights"])
                 self.actions = self.act(self.obs, eps_greedy=True, num_close_vehicles=num_close_vehicles)
                 if self.use_action_mapping:
-                    self.actions = (MOMA_DQN.SINGE_LANE_ACTION_MAPPING[action] for action in self.actions)
+                    self.actions = tuple([MOMA_DQN.SINGE_LANE_ACTION_MAPPING[action] for action in self.actions])
                 (
                     self.next_obs,
                     self.rewards,
@@ -209,7 +217,6 @@ class MOMA_DQN:
                     self.truncated,
                     info,
                 ) = self.env.step(self.actions)
-                
                 self.crashed = info["crashed"]
                 vehicle_obj_weights = info["vehicle_objective_weights"]
                 
@@ -217,6 +224,10 @@ class MOMA_DQN:
                 self.next_obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.next_obs] #remove nan values
                 
                 reward_summary = self.compute_reward_summary(self.rewards, vehicle_obj_weights)
+                
+                #re-map to an interval of 0 to n-1 for the network to train on
+                if self.use_action_mapping:
+                    self.actions = tuple([MOMA_DQN.SINGLE_LANE_REVERSE_ACTION_MAPPING[action] for action in self.actions])
 
                 self.buffer.push(self.obs, self.actions, self.next_obs, reward_summary, self.crashed, episode_nr, num_samples=self.num_controlled_vehicles)
                 
@@ -346,12 +357,18 @@ class MOMA_DQN:
         current_reward = None
         match self.reward_structure:
             case "mean_reward":
-                mean_social_utility = torch.sum(mean_weighted_social_rewards, dim = 1) #TODO: test if the dimension is correct
-                social_utility = mean_social_utility*num_close_vehicles
-                social_utility = social_utility.reshape(-1,1)
-                social_utility = torch.hstack([social_utility, social_utility])
-                current_reward = (ego_rewards + social_utility)
-                current_reward = current_reward/(num_close_vehicles+1).reshape(-1,1)
+                mean_social_utility = torch.sum(mean_weighted_social_rewards, dim = 1)
+
+                if self.increase_ego_reward_importance:
+                    social_utility = mean_social_utility.reshape(-1,1)
+                    social_utility = torch.hstack([social_utility, social_utility])
+                    current_reward = ((ego_rewards + social_utility)/2)
+                else:
+                    social_utility = mean_social_utility*num_close_vehicles
+                    social_utility = social_utility.reshape(-1,1)
+                    social_utility = torch.hstack([social_utility, social_utility])
+                    current_reward = (ego_rewards + social_utility)
+                    current_reward = current_reward/(num_close_vehicles+1).reshape(-1,1)
             case "ego_reward":
                 current_reward = ego_rewards #only select reward of ego vehicle
             case _:
@@ -490,7 +507,10 @@ class MOMA_DQN:
                     scalarised_mean_social_values = self.scalarisation_method.scalarise_actions(q_values_social, torch.tensor([1]*self.num_objectives, device = self.device))
                     
                     #take action based on mean scalarised values
-                    scalarised_values = (scalarised_ego_values + (scalarised_mean_social_values * num_close_vehicles[i])) / num_close_vehicles[i] + 1
+                    if self.increase_ego_reward_importance:
+                        scalarised_values = (scalarised_ego_values + scalarised_mean_social_values)/2
+                    else:
+                        scalarised_values = (scalarised_ego_values + (scalarised_mean_social_values * num_close_vehicles[i])) / num_close_vehicles[i] + 1
                     action = torch.argmax(scalarised_values).item()
 
                     #attributes for information display for observer vehicle
@@ -514,7 +534,8 @@ class MOMA_DQN:
             The hv_reference_point is a vector specifying the best possible vectorial reward vector."""
         
         self.eval_env = deepcopy(self.env)
-        self.eval_env.unwrapped.configure({"rng": self.rng})
+        self.rng = np.random.default_rng(seed)
+        self.eval_env.unwrapped.configure({"rng": self.rng, "set_uncontrolled_obj_weights": self.estimate_uncontrolled_obj_weights})
 
         if (episode_recording_interval is not None) or render_episodes:
             self.eval_env.reset()
@@ -527,7 +548,6 @@ class MOMA_DQN:
             self.eval_env = RecordVideoV0(self.eval_env, video_folder= video_location, name_prefix= video_name_prefix, 
                                                 episode_trigger=lambda x: x % episode_recording_interval == 0, fps=10)
 
-        self.rng = np.random.default_rng(seed)
         #get equally spaced objective weights
         objective_weights = get_reference_directions("energy", n_dim = self.num_objectives, n_points = num_points, seed=seed)
         objective_weights = torch.from_numpy(objective_weights).to(self.device)
@@ -563,7 +583,6 @@ class MOMA_DQN:
                 while not (self.terminated or self.truncated):
                     if render_episodes:
                         self.eval_env.render()
-
                     #select action based on obs. Execute action, add up reward, next iteration
                     self.obs = [torch.tensor(single_obs, device=self.device) for single_obs in self.obs] #reshape observations and
                     self.obs = [single_obs[~torch.isnan(single_obs)].reshape(1,-1) for single_obs in self.obs] #remove nan values
@@ -572,7 +591,7 @@ class MOMA_DQN:
                         num_close_vehicles = MOMA_DQN.__get_num_close_vehicles(info["vehicle_objective_weights"])
                     self.action = self.act(self.obs, eps_greedy=False, num_close_vehicles=num_close_vehicles)
                     if self.use_action_mapping:
-                        self.actions = (MOMA_DQN.SINGE_LANE_ACTION_MAPPING[action] for action in self.actions)
+                        self.action = tuple([MOMA_DQN.SINGE_LANE_ACTION_MAPPING[action] for action in self.action])
                     (
                     self.obs,
                     self.reward,

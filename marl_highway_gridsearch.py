@@ -29,7 +29,7 @@ env_config_3 = {
 }
 
 run_config = {
-    "env":  [env_config_3],#[env_config_1, env_config_2, env_config_3],
+    "env":  [env_config_1, env_config_2, env_config_3],
 
     "init": {
          "replay_buffer_size": [10_000],
@@ -37,6 +37,8 @@ run_config = {
          "reward_structure" : ["ego_reward", "mean_reward"],
          "use_multi_dqn" : [False,True],
          "observation_space_name" : ["OccupancyGrid"],
+         "increase_ego_reward_importance": [True],
+         "estimate_uncontrolled_obj_weights": [True],
     },
     "train": {
          "gamma": 0.99,
@@ -54,4 +56,4 @@ run_config = {
 }
 
 env = mo_gym.make('moma-highway-env-v0', render_mode='rgb_array')
-gridsearch(MOMA_DQN, env, run_config, seed=11, csv_file_path="data/moma_highway_test_final_3rd_config/", experiment_name="moma_highway_final_3rd_config")
+gridsearch(MOMA_DQN, env, run_config, seed=11, csv_file_path="data/moma_highway_test_final_estimates_weights/", experiment_name="moma_highway_test_final_estimates_weights")

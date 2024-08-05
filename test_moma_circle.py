@@ -10,20 +10,21 @@ import torch
 
 env = mo_gym.make('moma-circle-env-v0', render_mode='rgb_array')
 env.unwrapped.configure({
-    "screen_width": 500,
+    "screen_width": 501,
     "screen_height": 500,
-    "vehicles_count": 20,
-    "num_lanes": 1,
-    "inner_lane_radius": 60,
+    "vehicles_count": 13,
+    #"lanes_count": 1,
+    #"inner_lane_radius": 80,
+    #"duration": 100,
     "controlled_vehicles": 1,
-    "max_speed" : 10,
+    "max_speed" : 20,
     "min_speed" : 5,
-    "action": {
-        "type": "MultiAgentAction",
-        "action_config": {
-            "type": "DiscreteMetaAction",
-        }
-    }
+    #"action": {
+    #    "type": "MultiAgentAction",
+    #    "action_config": {
+    #       "type": "DiscreteMetaAction",
+     #   }
+    #}
 })
  
 env.unwrapped.configure({
@@ -37,4 +38,5 @@ truncated = False
 while True:
     env.render()
     obs, reward, done, truncated, info = env.step(1)
+    print(truncated)
     #print(env.unwrapped.controlled_vehicles[0].lane_index[0])

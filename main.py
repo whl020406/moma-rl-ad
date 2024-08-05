@@ -8,14 +8,16 @@ from mo_gymnasium import MONormalizeReward
 from highway_env.road.lane import StraightLane
 from highway_env.envs.common.observation import OccupancyGridObservation
 
-env = gym.make('moma-highway-env-v0', render_mode='rgb_array')
+env = gym.make('moma-circle-env-v0', render_mode='rgb_array')
 env.unwrapped.configure({
     "screen_width": 500,
     "fps": 20,
     "screen_height": 500,
-    "vehicles_count": 8,
-    "controlled_vehicles": 14,
+    "vehicles_count": 15,
+    "controlled_vehicles": 1,
     "duration": 80,  # [s]
+    "lanes_count": 1,
+    
 
     "observation": {
         "type": "MultiAgentObservation",
