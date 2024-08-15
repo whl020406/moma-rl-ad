@@ -72,7 +72,7 @@ def add_metadata(df: pd.DataFrame, parameters, env_config_id, experiment_id):
             df[parameter_name] = pd.Series([value] * len(df))
     return df
 
-def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_path: str = "data/", experiment_name: str = "experiment"):
+def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_path: str = "data/", experiment_name: str = "experiment", only_evaluate: bool = False):
     '''This function conducts gridsearch on a specific algorithm and environment in an effort to find optimal hyperparameters.
        The parameters to explore are defined in the run_config dictionary.
        The function generates a csv file of the evaluation results for each combination of hyperparameters
@@ -121,8 +121,12 @@ def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_path: 
                     agent = algorithm(env = env, num_objectives = 2, seed = seed, num_actions = 5, objective_names=["speed_reward", "energy_reward"], **parameters)
                 else:
                     agent = algorithm(env = env, num_objectives = 2, seed = seed, observation_space_shape = obs[0].shape, num_actions = 5, objective_names=["speed_reward", "energy_reward"], **parameters)
-                loss_logger = agent.train(**run_config["train"])
-                agent.store_network(csv_file_path, f"{experiment_name}_config_{env_config_id}_exp{experiment_id}.pth")
+                
+                if only_evaluate:
+                    agent.load_network(f"{csv_file_path}{experiment_name}_config_{env_config_id}_exp{experiment_id}.pth")
+                else:
+                    loss_logger = agent.train(**run_config["train"])
+                    agent.store_network(csv_file_path, f"{experiment_name}_config_{env_config_id}_exp{experiment_id}.pth")
                 
                 #run a final evaluation using the trained agent
                 video_prefix = f"config_{env_config_id}_exp_{experiment_id}"
@@ -132,15 +136,21 @@ def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_path: 
                 
                 summary_logger = add_metadata(summary_logger, parameters, env_config_id, experiment_id)
                 detail_logger = add_metadata(detail_logger, parameters, env_config_id, experiment_id)
-                loss_logger = add_metadata(loss_logger, parameters, env_config_id, experiment_id)
-
-                summary_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_summary.csv")
-                detail_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_detail.csv")
-                loss_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_loss.csv")
                 
                 summary_list.append(summary_logger)
                 detail_list.append(detail_logger)
-                loss_list.append(loss_logger)
+
+                if not only_evaluate:
+                    loss_logger = add_metadata(loss_logger, parameters, env_config_id, experiment_id)
+                    loss_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_loss.csv")
+                    loss_list.append(loss_logger)
+
+                    summary_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_summary.csv")
+                    detail_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_detail.csv")
+                else:
+                    summary_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_summary_EVALUATION.csv")
+                    detail_logger.to_csv(f"{file_path}_config_{env_config_id}_exp{experiment_id}_detail_EVALUATION.csv")
+
             except Exception as e:
                 print("The following error occurred during the experimentation. The current experiment configuration will be skipped")
                 print(repr(e))
@@ -149,10 +159,14 @@ def gridsearch(algorithm, env, run_config: dict, seed: int = 11, csv_file_path: 
             current_parameter_indices = increment_indices(current_parameter_indices, max_parameter_indices)
     
     summary = pd.concat(summary_list)
-    summary.to_csv(f"{file_path}_merged_summary.csv")
-
     detail = pd.concat(detail_list)
-    detail.to_csv(f"{file_path}_merged_detail.csv")
 
-    loss = pd.concat(loss_list)
-    loss.to_csv(f"{file_path}_merged_loss.csv")
+    if only_evaluate:
+        summary.to_csv(f"{file_path}_merged_summary_EVALUATION.csv")
+        detail.to_csv(f"{file_path}_merged_detail_EVALUATION.csv")
+    else:
+        summary.to_csv(f"{file_path}_merged_summary.csv")
+        detail.to_csv(f"{file_path}_merged_detail.csv")
+
+        loss = pd.concat(loss_list)
+        loss.to_csv(f"{file_path}_merged_loss.csv")

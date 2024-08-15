@@ -17,7 +17,7 @@ from utils import random_objective_weights
 Observation = TypeVar("Observation")
 
 class MOMAHighwayEnv(HighwayEnvFast):
-    '''Extends the standard highway environment to work with multiple objectives. The code was taken straight
+    '''Extends the standard highway environment to work with multiple objectives and agents. The code was taken straight
     from the HighwayEnv class of the highway_env module and adjusted at various points.'''
 
     @classmethod

@@ -1,6 +1,8 @@
 import pygame as pg
 import torch
 import numpy as np
+
+"""This class extends the display of the environment by including auxiliary information"""
 class InformationDisplay:
 
     #see https://highway-env.farama.org/actions/

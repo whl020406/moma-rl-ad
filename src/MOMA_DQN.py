@@ -233,8 +233,8 @@ class MOMA_DQN:
                 
                 #use next_obs as obs during the next iteration
                 self.obs = self.next_obs
-                #TODO: this is indented so that weights are updated every iteration instead of every episode
-                #update the weights every optimisation_frequency steps and only once the replay buffer is filled
+                
+                #update weights if replay buffer is sufficiently filled
                 if (self.buffer.num_elements >= self.batch_size):
                     loss = self.update_weights_func(episode_nr, num_of_conducted_optimisation_steps, inv_target_update_frequency)
                     acc_loss += loss
@@ -561,7 +561,7 @@ class MOMA_DQN:
 
         #for more detailed information on the individual vehicles
         #target and actual speeds are only useful for uncontrolled vehicles, while weights are only applicable to controlled vehicles
-        feature_names = ["repetition_number", "weight_index", "weight_tuple", "iteration", "vehicle_id", "controlled_flag", "action", "target_speed", "curr_speed", "acc", "lane"]
+        feature_names = ["repetition_number", "weight_index", "weight_tuple", "iteration", "vehicle_id", "controlled_flag", "action", "target_speed", "curr_speed", "acc", "lane", "x_pos"]
         feature_names.extend([f"curr_{x}" for x in self.objective_names])
         vehicle_logger = DataLogger("vehicle_logger", feature_names)
         
@@ -620,7 +620,7 @@ class MOMA_DQN:
                             controlled_vehicles_count += 1
                         vehicle_logger.add(repetition_nr, tuple_index, weight_tuple.tolist(), curr_num_iterations, 
                                            vehicle_id, vehicle.is_controlled, action, vehicle.target_speed, vehicle.speed, 
-                                           acc, lane, *reward.tolist())
+                                           acc, lane, vehicle.position[0], *reward.tolist())
 
                     curr_num_iterations += 1
 
