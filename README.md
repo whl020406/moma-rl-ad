@@ -1,7 +1,7 @@
 # MOMA-DQN
 This repositority contains the implementation of a multi-agent multi-objective reinforcement learning algorithm based on Q-learning, intended to be used for the autonomous driving domain
 
-![Baseline Algorithm](https://github.com/franzherm/moma-rl-ad/blob/main/videos/baseline_algo_ego_reward_CVR_0.1.gif)
+![Baseline Algorithm](https://github.com/franzherm/moma-rl-ad/blob/main/videos/CVR_0.4_NS_separated_RS_Mean.gif)
 
 The algorithm was tested on a highway traffic network. The requirements.txt contains the required python modules to be installed. The following section contains a description of the project file structure. The code was programmed using python 3.12.3
 
