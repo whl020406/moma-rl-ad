@@ -5,12 +5,12 @@ from highway_env.envs import HighwayEnvFast
 from highway_env.vehicle.kinematics import Vehicle
 from highway_env.vehicle.controller import ControlledVehicle
 from highway_env.utils import near_split
-from energy_calculation import NaiveEnergyCalculation
+from src.energy_calculation import NaiveEnergyCalculation
 import torch
-from utils import random_objective_weights
+from src.utils import random_objective_weights
 from highway_env.envs.common.action import action_factory, Action
 from highway_env.envs.common.observation import observation_factory
-from observations import AugmentedMultiAgentObservation
+from src.observations import AugmentedMultiAgentObservation
 
 class MOHighwayEnv(HighwayEnvFast):
     '''Extends the standard highway environment to work with multiple objectives. The code was taken straight

@@ -2,7 +2,7 @@ from typing import Dict, Text
 import numpy as np
 from highway_env import utils
 from highway_env.envs import AbstractEnv, RoadNetwork, Road, LineType, CircularLane
-from energy_calculation import NaiveEnergyCalculation
+from src.energy_calculation import NaiveEnergyCalculation
 from highway_env.vehicle.controller import ControlledVehicle
 from circle_env import CircleEnv
 from highway_env.vehicle.controller import MDPVehicle

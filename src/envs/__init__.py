@@ -1,31 +1,18 @@
-from circle_env import *
-from mo_circle_env import *
-from mo_highway_env import *
-from moma_highway_env import *
-from moma_circle_env import *
+# ✅ 文件：envs/__init__.py（统一注册）
+from .circle_env import CircleEnv
+from .mo_circle_env import MOCircleEnv
+from .moma_circle_env import MOMACircleEnv
+from .moma_highway_env import MOMAHighwayEnv
+
+import gymnasium as gym
 from gymnasium.envs.registration import register
 
-# Hide pygame support prompt
-import os
-os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+register(
+    id="moma-highway-env-v0",
+    entry_point="envs.moma_highway_env:MOMAHighwayEnv",
+)
 
 register(
-        id='circle-env-v0',
-        entry_point='envs:CircleEnv',
-    )
-register(
-        id='mo-circle-env-v0',
-        entry_point='envs:MOCircleEnv',
-    )
-register(
-        id="moma-circle-env-v0",
-        entry_point='envs:MOMACircleEnv'
-    )
-register(
-        id='mo-highway-env-v0',
-        entry_point='envs:MOHighwayEnv',
-    )
-register(
-        id="moma-highway-env-v0",
-        entry_point='envs:MOMAHighwayEnv'
-    )
+    id="moma-circle-env-v0",
+    entry_point="envs.moma_circle_env:MOMACircleEnv",
+)
